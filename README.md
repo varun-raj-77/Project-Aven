@@ -5,9 +5,11 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-001, repository/bootstrap, principles, and experiment
-manifest.** There is no running Aven, API, web app, database, learning engine,
-or Root gateway in this foundation. EXP-001 has not been run.
+**Current scope: AVEN-002 shared typed contracts, on the frozen AVEN-001
+foundation (`9aa52bf`, tag `aven-001`).** The
+[contracts package](packages/contracts/README.md) defines schemas and types.
+There is no running Aven, API, web app, database, learning engine, or Root
+gateway in this foundation. EXP-001 has not been run.
 
 ## Start here
 
@@ -39,12 +41,14 @@ pnpm check
 
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
-repository tooling only. Tests validate experiment metadata and freeze gates;
+repository tooling and the contracts package, including compile-time ID checks.
+Tests validate contract boundaries, experiment metadata, and freeze gates;
 passing them is not evidence of learning quality or runtime security.
 
 Dependencies are pinned and locked. Strict TypeScript, Zod metadata validation,
-Prettier, YAML parsing, and Vitest are available at the root. There is no app
-framework or model SDK. The setup follows the official
+Prettier, YAML parsing, and Vitest are available at the root. The contracts
+workspace declares its pinned Zod dependency. There is no app framework or model
+SDK. The setup follows the official
 [pnpm workspace instructions](https://pnpm.io/workspaces),
 [TypeScript strict configuration](https://www.typescriptlang.org/tsconfig/strict.html),
 [Vitest guide](https://vitest.dev/guide/), and
@@ -66,8 +70,8 @@ aven/
   tooling/       scripts and bootstrap tests
 ```
 
-Empty app/package directories contain `.gitkeep` only. Workspace globs are ready
-for later milestones; only the root is currently an installable project.
+`packages/contracts` is an installable private workspace package. Other
+app/package directories remain placeholders containing `.gitkeep` only.
 
 ## Experiment and authority
 
@@ -88,4 +92,6 @@ execution. Provider choice and any future remote transfer of owner context
 require an explicit privacy decision. Do not put private data or credentials in
 this repo.
 
-AVEN-002 and every runtime feature are deferred. Stop after AVEN-001.
+AVEN-003 and every runtime feature remain deferred. Stop after AVEN-002. The
+AVEN-001 source summaries and experiment documents retain their historical
+milestone context; the current authorization is recorded in `AGENTS.md`.

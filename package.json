@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aven governed-learning experiment foundation; AVEN-001 only",
+  "description": "Aven experiment foundation and AVEN-002 shared contracts",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24 <25",
@@ -12,7 +12,7 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit && pnpm --filter @aven/contracts typecheck",
     "experiment:check": "node tooling/scripts/check-experiment.ts",
     "test": "vitest run",
     "check": "pnpm format:check && pnpm typecheck && pnpm experiment:check && pnpm test"

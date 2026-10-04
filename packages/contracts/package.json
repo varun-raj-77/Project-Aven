@@ -1,0 +1,21 @@
+{
+  "name": "@aven/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Provider-independent AVEN-002 boundary schemas and types",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. --config vitest.config.ts packages/contracts/test"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

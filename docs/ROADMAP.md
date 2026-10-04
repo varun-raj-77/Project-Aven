@@ -7,7 +7,7 @@ The eight-week outline is a planning reference, not a delivery promise.
 | ID       | Deliverable                                           | Gate / status                                                                            |
 | -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | AVEN-001 | Repository/bootstrap, principles, experiment manifest | Foundation complete; formatting/typecheck/manifest and 12 tests passed; stop             |
-| AVEN-002 | Shared typed contracts                                | Pending; boundary validation and explicit owner/source/version semantics                 |
+| AVEN-002 | Shared typed contracts                                | Implemented; strict schemas and contract checks; no runtime enforcement                  |
 | AVEN-003 | Database schema                                       | Pending; SQLite preference, owner/version/trust fields                                   |
 | AVEN-004 | Append-only Experience Ledger                         | Pending; recoverable evidence and rebuild tests                                          |
 | AVEN-005 | Chat/session API                                      | Pending; current task/session state without durable self-write                           |
@@ -28,7 +28,8 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-020 | Frozen end-to-end A/B/C experiment                    | Pending; untouched final cases, full outcomes and limitations; evaluate before expansion |
 
 No framework adapter is required; one is optional only when it directly serves
-the experiment. No milestone after AVEN-001 is authorized by this task.
+the experiment. Current authorization stops after AVEN-002. AVEN-003 is not
+authorized by this task.
 
 ## Longer-term gates, all deferred
 
