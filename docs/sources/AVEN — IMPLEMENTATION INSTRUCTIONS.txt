@@ -1,0 +1,604 @@
+AVEN — IMPLEMENTATION INSTRUCTIONS
+
+MISSION
+
+Build Aven as a neutral, owner-agnostic, local-first personal AI agent that becomes increasingly useful to one owner through evidence-backed learning.
+
+The immediate goal is NOT to build the complete vision.
+
+The immediate goal is to prove the Aven learning architecture with a minimal vertical slice.
+
+--------------------------------------------------
+1. DO NOT REDESIGN WITHOUT EVIDENCE
+--------------------------------------------------
+
+The architecture has already passed the exploration stage.
+
+Do not repeatedly replace core architecture because another framework, paper, conference talk, or agent pattern looks interesting.
+
+Architecture changes require a concrete implementation problem, failed experiment, security issue, or measurable advantage.
+
+Prefer implementation and evidence over additional speculative design.
+
+--------------------------------------------------
+2. CORE ARCHITECTURE IS LOCKED
+--------------------------------------------------
+
+Aven must have:
+
+- one persistent owner-facing Aven
+- a fast execution loop
+- a separate slow learning loop
+- an append-only Experience Ledger
+- typed owner state
+- task-specific context assembly
+- explicit action proposals
+- a Root-controlled policy gateway
+- verification after consequential execution
+- candidate learning
+- independent evaluation
+- versioned promotion
+- rollback
+- safe fallback behavior
+
+--------------------------------------------------
+3. NEUTRAL AVEN V1
+--------------------------------------------------
+
+Aven v1.0 must contain no embedded owner personality, habits, preferences, tone, workflows, history, or personal assumptions.
+
+Every new owner starts from the same neutral base.
+
+Onboarding should collect only context genuinely required to operate.
+
+After minimal onboarding, the primary experience should be:
+
+"Start Talking"
+
+Personalization must emerge from interaction.
+
+--------------------------------------------------
+4. FAST LOOP AND SLOW LOOP MUST REMAIN SEPARATE
+--------------------------------------------------
+
+FAST LOOP
+
+Owner request
+→ intent
+→ context
+→ plan
+→ policy
+→ execution
+→ verification
+→ response
+→ experience event
+
+The fast loop helps the owner now.
+
+It must not casually rewrite long-term owner behavior while answering.
+
+SLOW LOOP
+
+Experience Ledger
+→ correction/pattern detection
+→ candidate hypothesis
+→ evidence gathering
+→ counterexample search
+→ historical replay
+→ held-out evaluation
+→ promotion recommendation
+→ Root/Owner promotion
+→ monitoring
+
+The slow loop improves future behavior.
+
+--------------------------------------------------
+5. EXPERIENCE LEDGER IS SOURCE OF TRUTH
+--------------------------------------------------
+
+Raw experience must be preserved.
+
+Do not store only compressed conclusions about the owner.
+
+Historical events should remain recoverable and append-only.
+
+Derived owner state must be rebuildable from the Experience Ledger.
+
+Never silently rewrite historical evidence.
+
+--------------------------------------------------
+6. OWNER STATE MUST BE TYPED
+--------------------------------------------------
+
+Do not create one giant generic memory.
+
+Maintain distinct types including:
+
+- facts
+- preferences
+- episodic memories
+- intent patterns
+- procedures
+- active task state
+
+Learned items should include when applicable:
+
+- provenance
+- scope
+- confidence
+- supporting evidence
+- counterexamples
+- created time
+- last validated time
+- status
+- version
+- supersession relationship
+
+Possible lifecycle states:
+
+observed
+candidate
+validated
+trusted
+superseded
+revoked
+
+--------------------------------------------------
+7. EXAMPLES MUST NOT BECOME PERMANENT SCOPE
+--------------------------------------------------
+
+Treat owner-provided examples as illustrative unless language clearly establishes them as the requested scope.
+
+A salient example from an earlier interaction must not dominate unrelated future reasoning.
+
+Owner corrections should reduce the future salience of incorrect interpretations.
+
+Learning includes knowing what NOT to foreground.
+
+--------------------------------------------------
+8. LEARNING IS HYPOTHESIS, NOT TRUTH
+--------------------------------------------------
+
+Model-generated interpretations are hypotheses.
+
+Aven may infer a potential preference, intent pattern, or procedure.
+
+It must not automatically treat that inference as authoritative.
+
+Use evidence and evaluation.
+
+"No useful lesson was found" is always a valid learning result.
+
+Never force the learning engine to save something.
+
+--------------------------------------------------
+9. CORRECTIONS ARE HIGH-VALUE SIGNALS
+--------------------------------------------------
+
+Explicit owner corrections should be captured and linked to the behavior being corrected.
+
+Corrections may concern:
+
+- fact
+- scope
+- preference
+- intent
+- procedure
+- communication
+- permission
+
+Do not blindly turn one correction into a universal rule.
+
+Infer the narrowest supported scope first.
+
+Search for counterexamples.
+
+--------------------------------------------------
+10. ROOT IS AUTHORITATIVE
+--------------------------------------------------
+
+Aven must never be the final authority over consequential actions.
+
+Root owns:
+
+- owner authentication
+- permissions
+- policy evaluation
+- secrets
+- immutable audit integrity
+- eval vault
+- sandbox boundaries
+- promotion
+- rollback
+- trusted version selection
+
+Aven may not modify Root.
+
+Future coding/self-improvement agents may not receive writable access to Root.
+
+--------------------------------------------------
+11. PERMISSION IS NOT A PROMPT
+--------------------------------------------------
+
+Rules governing consequential actions must be enforced outside the LLM.
+
+Aven produces typed Action Proposals.
+
+Root produces:
+
+ALLOW
+DENY
+REQUIRE_OWNER_APPROVAL
+
+Do not rely on "please ask before doing X" inside a system prompt for security.
+
+--------------------------------------------------
+12. HUMAN-IN-THE-LOOP IS RISK BASED
+--------------------------------------------------
+
+Do not ask permission for everything.
+
+Classify actions by consequence and reversibility.
+
+Low-risk/read operations may proceed automatically.
+
+Medium-risk actions depend on policy and owner preference.
+
+High-risk actions normally require explicit owner approval.
+
+Root-level actions cannot be delegated to Aven.
+
+--------------------------------------------------
+13. CONTEXT IS NOT MEMORY
+--------------------------------------------------
+
+Never dump all owner memory into every prompt.
+
+The Context Broker should retrieve only information relevant to the current task.
+
+Context selection should consider:
+
+- relevance
+- provenance
+- scope
+- confidence
+- freshness
+- salience
+- supersession
+- negative retrieval signals
+
+--------------------------------------------------
+14. SPECIALIST AGENTS
+--------------------------------------------------
+
+There is one persistent Aven.
+
+Specialist agents are internal workers.
+
+Prefer:
+
+memory
+→ procedure
+→ skill
+→ deterministic tool
+→ specialist agent
+
+in that order when practical.
+
+Do not create another agent merely because agent creation is possible.
+
+Specialists should be:
+
+- scoped
+- ephemeral where possible
+- permission-limited
+- context-limited
+- budget-limited
+- unable to modify Root
+- unable to promote themselves
+
+--------------------------------------------------
+15. STRANDS
+--------------------------------------------------
+
+AWS Strands may be used behind an Aven-owned runtime abstraction for generic agent execution.
+
+Strands must not define Aven's learning architecture.
+
+Keep an interface boundary so the underlying agent framework can be replaced.
+
+Aven-owned components include:
+
+- Experience Ledger
+- Owner Model
+- Learning Engine
+- Context Broker
+- correction handling
+- Personal Eval system
+- Root
+- promotion/rollback
+- evolution lineage
+
+--------------------------------------------------
+16. MODEL INDEPENDENCE
+--------------------------------------------------
+
+Aven must not equal one foundation model.
+
+Use a provider/runtime abstraction.
+
+Different work may eventually use different models based on:
+
+- complexity
+- privacy
+- latency
+- cost
+- context size
+- reasoning requirement
+- tool capability
+
+Aven's persistent identity lives above the foundation model.
+
+--------------------------------------------------
+17. EVALUATION IS MANDATORY
+--------------------------------------------------
+
+Candidate learning must be compared against trusted behavior.
+
+Use combinations of:
+
+- historical replay
+- counterexamples
+- paraphrases
+- held-out cases
+- scope tests
+- regression tests
+- permission tests
+- safety invariants
+
+The same agent that generates a candidate must not be the sole authority deciding whether the candidate is better.
+
+--------------------------------------------------
+18. SHADOW MODE
+--------------------------------------------------
+
+Potentially important learned behavior should be capable of running in shadow mode.
+
+Trusted behavior controls the real task.
+
+Candidate behavior predicts what it would have done.
+
+Compare results before promotion.
+
+--------------------------------------------------
+19. FALLBACKS
+--------------------------------------------------
+
+If Aven is uncertain, conflicted, stale, under-evidenced, unverifiable, or outside permission scope, prefer in order:
+
+1. explicit current owner instruction
+2. previous trusted behavior
+3. neutral/default behavior
+4. asking the owner when the consequence justifies interruption
+
+Never speculate merely to appear personalized.
+
+--------------------------------------------------
+20. OBSERVABILITY
+--------------------------------------------------
+
+Do not depend on hidden chain-of-thought for debugging or auditing.
+
+Record structured events including:
+
+- interpreted intent
+- relevant context references
+- selected procedure
+- model/tool choice
+- action proposal
+- policy result
+- approval evidence
+- execution result
+- verification result
+- owner correction
+- learning candidate IDs
+
+--------------------------------------------------
+21. SELF-MODIFYING CODE IS NOT V0.1
+--------------------------------------------------
+
+Do not allow Aven v0.1 to rewrite trusted production code.
+
+Later self-improvement follows:
+
+detected issue
+→ falsifiable hypothesis
+→ isolated candidate workspace
+→ code generation
+→ tests
+→ independent evaluations
+→ security review
+→ shadow operation where appropriate
+→ authenticated owner approval
+→ promotion
+→ monitoring
+→ rollback
+
+Never:
+
+Aven proposes change
+→ Aven edits production
+→ Aven approves itself
+
+--------------------------------------------------
+22. FUTURE AGENT FACTORY
+--------------------------------------------------
+
+When Aven eventually learns a stable owner workflow, determine whether it should become:
+
+- memory
+- preference
+- procedure
+- skill
+- deterministic tool
+- specialist agent
+- architectural improvement
+
+Do not default to another agent.
+
+When a specialist is justified, instantiate it from a generic Agent Blueprint whenever possible.
+
+Write new code only when existing capabilities cannot express the required behavior.
+
+--------------------------------------------------
+23. FUTURE SELF-IMPROVEMENT PRINCIPLE
+--------------------------------------------------
+
+Aven may eventually create:
+
+- skills
+- tools
+- specialist agents
+- context strategies
+- routing strategies
+- planning strategies
+- non-Root code candidates
+
+But:
+
+Aven is allowed to CREATE freely inside containment.
+
+Aven is not allowed to TRUST its own creation.
+
+Independent evidence and Root-controlled promotion remain mandatory.
+
+--------------------------------------------------
+24. V0.1 SCOPE
+--------------------------------------------------
+
+Build only enough to prove:
+
+Owner input
+→ Intent
+→ Context Broker
+→ Typed owner state
+→ Planner
+→ Action Proposal
+→ Root Policy Gateway
+→ sandboxed tool
+→ Verification
+→ Experience Ledger
+→ Learning Candidate
+→ Evaluation
+→ controlled promotion
+
+Do not build first:
+
+- voice
+- telephony
+- restaurant calling
+- smart-home control
+- autonomous browser/computer use
+- multi-agent swarm
+- emotional/affective architecture
+- survival experiments
+- self-rewriting production code
+- model fine-tuning
+- startup website
+- billing
+- giant integration catalog
+
+--------------------------------------------------
+25. INITIAL BUILD ORDER
+--------------------------------------------------
+
+Start with:
+
+AVEN-001 repository/bootstrap
+AVEN-002 shared contracts
+AVEN-003 database schema
+AVEN-004 append-only Experience Ledger
+AVEN-005 chat/session API
+AVEN-006 model/runtime abstraction
+AVEN-007 Strands adapter if selected
+AVEN-008 Context Broker
+AVEN-009 typed Owner Model
+AVEN-010 Action Proposal
+AVEN-011 Root Policy Gateway
+AVEN-012 one sandbox tool
+AVEN-013 Verification
+AVEN-014 correction events
+AVEN-015 Learning Hypothesis generator
+AVEN-016 Eval Harness
+AVEN-017 Shadow mode
+AVEN-018 Promotion controller
+AVEN-019 Rollback
+AVEN-020 first complete end-to-end experiment
+
+Stop after AVEN-020 and evaluate before expanding scope.
+
+--------------------------------------------------
+26. SUCCESS STANDARD
+--------------------------------------------------
+
+Aven v0.1 is not successful because chat works.
+
+It succeeds only if:
+
+- learned behavior has clear provenance
+- learning is appropriately scoped
+- owner corrections materially affect future behavior
+- learned behavior avoids obvious overgeneralization
+- behavior is reversible
+- policy cannot be bypassed by the model
+- derived owner state can be rebuilt from raw events
+- candidate learning can be evaluated before promotion
+- rollback works
+- Learned Aven measurably outperforms Fresh Aven on held-out owner-specific tasks without unacceptable regressions
+
+If Learned Aven does not beat Fresh Aven, treat that as an experimental failure to investigate rather than pretending personalization worked.
+
+--------------------------------------------------
+27. ENGINEERING STYLE
+--------------------------------------------------
+
+Prefer:
+
+- simple modular architecture
+- strict TypeScript
+- Zod schemas at boundaries
+- deterministic code where deterministic code is sufficient
+- tests for invariants
+- explicit state machines
+- evidence-backed decisions
+- small vertical slices
+- observable behavior
+- reversible changes
+
+Avoid:
+
+- premature microservices
+- framework lock-in
+- agent-for-everything architecture
+- hidden magical learning
+- unnecessary infrastructure
+- speculative abstractions with no immediate use
+- optimizing for demos at the expense of correctness
+
+--------------------------------------------------
+28. PROJECT PRINCIPLE
+--------------------------------------------------
+
+Aven adapts to the owner.
+
+The owner should not have to adapt to Aven.
+
+Adaptation must remain:
+
+inspectable
+scoped
+reversible
+evidence-backed
+permissioned
+
+The immediate job is to implement and test that principle.

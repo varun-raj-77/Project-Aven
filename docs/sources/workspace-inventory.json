@@ -1,0 +1,307 @@
+[
+  {
+    "path": "AVEN_PROJECT_DECISION_2026-10-01.md",
+    "bytes": 66347,
+    "sha256": "1d98be83ed52d6456798754cf1d0ff0167349387a36e14c9a60c532664015c0e"
+  },
+  {
+    "path": "FINAL_PROJECT_SEARCH_2026-10-02.md",
+    "bytes": 65584,
+    "sha256": "bdf2b13d1cf13bc42106a0f8ee2b48625c4f36310005222d0c21d57c032d6fce"
+  },
+  {
+    "path": "FINAL_SEARCH_PROBLEM_ATLAS_2026-10-02.md",
+    "bytes": 40352,
+    "sha256": "ee94a961cfdf5de85f0b4fd529c46041db85ace9e759e6a3131210b519a0043a"
+  },
+  {
+    "path": "FINAL_SEARCH_SCORECARDS_2026-10-02.md",
+    "bytes": 26696,
+    "sha256": "b76921d70cade9b5ab68cf064af2c1b57eef3f150a8413386b35ffa921150c99"
+  },
+  {
+    "path": "research-final-search/accessibility-deep.txt",
+    "bytes": 38444,
+    "sha256": "0d6b9feb019d3cc10dbe13fd1f4fb2f8fb612ddc913f8f2b3de1bbda638c7f96"
+  },
+  {
+    "path": "research-final-search/additional-prior-art-0.txt",
+    "bytes": 35703,
+    "sha256": "b25c70f436a3c8801a67dadde583a7597490c72b64dfec93374e9697f69acd92"
+  },
+  {
+    "path": "research-final-search/additional-prior-art-1.txt",
+    "bytes": 40088,
+    "sha256": "8f6c5f36e53000bdf0b2a999505897f887e5d2a79e44e6118eaa91e5f1f131fd"
+  },
+  {
+    "path": "research-final-search/agent-security-deep.txt",
+    "bytes": 37858,
+    "sha256": "862fc3f4e17ce301fe3cfde5dd5e73c6f1d330ea35e7d627bf004c4aebaa5c48"
+  },
+  {
+    "path": "research-final-search/assurance-precedent.txt",
+    "bytes": 35394,
+    "sha256": "e653c544cd9678be57eabd9c7b85de0ac41dafab746fc802f177092915e5bc3b"
+  },
+  {
+    "path": "research-final-search/atlas-source-check.txt",
+    "bytes": 35212,
+    "sha256": "a9e084855d1e1325be66bd55bc12c54f843a656a4ffceb3b919a3aaab61456cd"
+  },
+  {
+    "path": "research-final-search/c-migration-detail.txt",
+    "bytes": 28963,
+    "sha256": "8d9a9c8e35844c1469d01463453a7829dff7d8a8458a80cea50d71728e08f06d"
+  },
+  {
+    "path": "research-final-search/citation-audit-0.txt",
+    "bytes": 27199,
+    "sha256": "fa5851defd9dc90f15ace52ae6a5426b26775c749c4324d76bc64d48cc500d27"
+  },
+  {
+    "path": "research-final-search/citation-audit-1.txt",
+    "bytes": 30883,
+    "sha256": "54c97a5b0b18e7ffa2cb1d930bcee67f15f55738a3d198d05b576e677966d60a"
+  },
+  {
+    "path": "research-final-search/citation-audit-2.txt",
+    "bytes": 31043,
+    "sha256": "fb957ec4f79994b6f34dfdb00d5ca22c4dd531044e7f5f6430f82368f0c0d4eb"
+  },
+  {
+    "path": "research-final-search/clinical-workflows.txt",
+    "bytes": 40215,
+    "sha256": "4ebffa2c1cbc81531b37fb2150402d23ea1d4707c0a1c40b680f07d7f775a803"
+  },
+  {
+    "path": "research-final-search/concurrency.txt",
+    "bytes": 35175,
+    "sha256": "316ae5112d3f566f32d5ea2eb40eeeb06d5a1a9eec8d6ff08917d39c3ad39bc3"
+  },
+  {
+    "path": "research-final-search/db-network.txt",
+    "bytes": 36937,
+    "sha256": "9773069f38033d823b7e9957a4409d2c8b15c646b5468d81f95a23573aad18b9"
+  },
+  {
+    "path": "research-final-search/education-energy.txt",
+    "bytes": 40102,
+    "sha256": "9f07f58fd2427bea4ca44f16d1ddfc649fa6d83b5da250b262dfbc6d284e7c52"
+  },
+  {
+    "path": "research-final-search/evaluation-education.txt",
+    "bytes": 39692,
+    "sha256": "504e87f01367d972ecbac2f7ef7a52946d5cb29a90c4fd2537a8de476c4ca4db"
+  },
+  {
+    "path": "research-final-search/finance.txt",
+    "bytes": 39416,
+    "sha256": "6a019e07b5dd81c46c5c0cf33a1159878f87fc504d03d21b288b2e1aebf5cf36"
+  },
+  {
+    "path": "research-final-search/gpu-kill.txt",
+    "bytes": 34257,
+    "sha256": "9e9f4d7328600264aa7e1381f02d3dc27dccbaf273eb44fa52daa086065e8ff8"
+  },
+  {
+    "path": "research-final-search/gpu-verification.txt",
+    "bytes": 35411,
+    "sha256": "ccf9020817c94cdd022ae1cab8304e4a22487318a62b0fe004c0d2e56e288466"
+  },
+  {
+    "path": "research-final-search/health-semantic.txt",
+    "bytes": 35489,
+    "sha256": "76ceb31f160eb3550cc56781ec591b909714abdf348b05620affe2ff0b805d41"
+  },
+  {
+    "path": "research-final-search/human-access.txt",
+    "bytes": 38449,
+    "sha256": "f8351270dfaaaa6edf57189832d8e093dd57b0225d97a05928c272e7fd2e7d5a"
+  },
+  {
+    "path": "research-final-search/incidents.txt",
+    "bytes": 35332,
+    "sha256": "fc6f9bc629f8102625c612cc2704916a61842beefabd43dbf27d14d4d17c53f2"
+  },
+  {
+    "path": "research-final-search/integrity.txt",
+    "bytes": 37716,
+    "sha256": "ba687c61a580780fde9d7c49949cc77c074fb765588b5c70a99c4c33be19d058"
+  },
+  {
+    "path": "research-final-search/internet-identity.txt",
+    "bytes": 35085,
+    "sha256": "cb247c1a22679a75594efdc7458d06d4b3fd7d445d7a4a045ed0f443b7f6be61"
+  },
+  {
+    "path": "research-final-search/kernel-detail.txt",
+    "bytes": 28586,
+    "sha256": "fd5aeac434cab0e74466d8a386a6ec7a2c9fd97fafcade104004762ca1723716"
+  },
+  {
+    "path": "research-final-search/memory-safety.txt",
+    "bytes": 36476,
+    "sha256": "6836fd7f068f4603131a48289fa381651c0daa070859e9cda30513b2f29e819b"
+  },
+  {
+    "path": "research-final-search/migration-boundaries.txt",
+    "bytes": 36109,
+    "sha256": "55804438443ae71fd5f63566d1d70347800696b5ca9008202a141edffde9e0f9"
+  },
+  {
+    "path": "research-final-search/migration-prior-art.txt",
+    "bytes": 36706,
+    "sha256": "9b2b83e7f72fffae79135612eb1b14a39b05243f36007d001059b173484d8803"
+  },
+  {
+    "path": "research-final-search/migration-proof.txt",
+    "bytes": 35369,
+    "sha256": "74b0cc2ba5784ae23c6eaafbad55d231c14a1d421d0c9248bbd549e6579a87ab"
+  },
+  {
+    "path": "research-final-search/nontech-domains.txt",
+    "bytes": 40065,
+    "sha256": "8e974fc5e5a3df1800de1a91db02b506b6c353fa0bf793cbe9b1a872b0c6c4f4"
+  },
+  {
+    "path": "research-final-search/numerical-adversarial.txt",
+    "bytes": 36897,
+    "sha256": "be7e0be75b2bf6bb22590442e0786e2ede59303448e5318c7bdfe2c3b8e6324f"
+  },
+  {
+    "path": "research-final-search/numerical-tools.txt",
+    "bytes": 34839,
+    "sha256": "c3288924397aa130d4d927de099a346d0a8cd0d5a578426f1313ef25f54be8ee"
+  },
+  {
+    "path": "research-final-search/numerics.txt",
+    "bytes": 34818,
+    "sha256": "de5387fbbf8645dfacbd0c800b12733d33df7a4e7883105b0a720d9a367e52d0"
+  },
+  {
+    "path": "research-final-search/other-compute.txt",
+    "bytes": 38319,
+    "sha256": "9904924cd8c337c32c3cbdac8e40f0da4b3b3202d0124a35a06d155506c07ca4"
+  },
+  {
+    "path": "research-final-search/predecessor-status.txt",
+    "bytes": 33004,
+    "sha256": "04dbbda0a53ee2dbcce337b32403c873bdcb1f349ebd9c185bd4c6f9b8227728"
+  },
+  {
+    "path": "research-final-search/privacy-collaboration.txt",
+    "bytes": 37070,
+    "sha256": "1590550819f35d1bc5e00896fa5961de004da9b1ad0275ac9db594de4eda7d22"
+  },
+  {
+    "path": "research-final-search/privacy.txt",
+    "bytes": 37237,
+    "sha256": "5574e59bc05cc67427b6719566441a9199a3a2e1cf196c0fb3c148631340b4f9"
+  },
+  {
+    "path": "research-final-search/public-services.txt",
+    "bytes": 40250,
+    "sha256": "b2a2df70adce2477061b8baf0bbf28c07508523743187bb2ca7ac1e5891eedf0"
+  },
+  {
+    "path": "research-final-search/real-migrations.txt",
+    "bytes": 35900,
+    "sha256": "3659660532beddab6d7881b80f549beba8134c9801665e42760a3812fe8fd589"
+  },
+  {
+    "path": "research-final-search/recovery-detail.txt",
+    "bytes": 34041,
+    "sha256": "f657dc88e8111f66a0199363f0783702dd80541b75b669370c31088463295e06"
+  },
+  {
+    "path": "research-final-search/recovery-gap.txt",
+    "bytes": 38536,
+    "sha256": "5b4d23ed5574cf34a3ade1489a306f5c818ab0bc7beb12daf6b24154acf4b1e2"
+  },
+  {
+    "path": "research-final-search/recovery-prior-art.txt",
+    "bytes": 36801,
+    "sha256": "bba1cda567b18a47914f5a303ef013b404431b92e4789f25dac6b5222a338e35"
+  },
+  {
+    "path": "research-final-search/recovery-research.txt",
+    "bytes": 37519,
+    "sha256": "7c1a9fb884f4f2841922345493d23c02011fa3ad8c24283fda8482e395ad3163"
+  },
+  {
+    "path": "research-final-search/remaining-evidence.txt",
+    "bytes": 36837,
+    "sha256": "c4fbca6fed19bc4be7e5fc851632f27e537be412869d4069f2097c7af828b9d0"
+  },
+  {
+    "path": "research-final-search/reproducibility-data.txt",
+    "bytes": 37546,
+    "sha256": "8b7e439643e913ce6c7550ecdbf6de6aa0bc2e683e7810aa8426eb62940b02ea"
+  },
+  {
+    "path": "research-final-search/required-candidates.txt",
+    "bytes": 39104,
+    "sha256": "aab84d4fece555e5ed021512aec365d17fbd55f24ea17050079b19e108672b2b"
+  },
+  {
+    "path": "research-final-search/safe-migration-products.txt",
+    "bytes": 37595,
+    "sha256": "9b96466ce1904d2113958b013e386ef151043c821d7df8ce0c0e05efec1ab7d1"
+  },
+  {
+    "path": "research-final-search/semantic-health-products.txt",
+    "bytes": 38821,
+    "sha256": "37c6646203ba4ee1656a73837e01d2e0bcbdcd6167993a62a4de07734eb0d7ae"
+  },
+  {
+    "path": "research-final-search/semantic-runtime-deep.txt",
+    "bytes": 38456,
+    "sha256": "a3c0826ba1fa51aee11403e0ef324ca931a04b910bdfe18e2e816bf8f09a3515"
+  },
+  {
+    "path": "research-final-search/state-data.txt",
+    "bytes": 37149,
+    "sha256": "8092794f3f74a8fbe3316dcef377555768f9f39eaf89b3810b756a3bb370ca1c"
+  },
+  {
+    "path": "research-final-search/systems-a.txt",
+    "bytes": 35385,
+    "sha256": "31a869a32214904c43d8c18e8d5dcd68be059bcd0134db3edceb02a6d91d1229"
+  },
+  {
+    "path": "research-final-search/systems-b.txt",
+    "bytes": 34332,
+    "sha256": "8ab74fb2983e846f1b17b0e85dc14e11c5b30d5541865ed4a47366b12a9cd72a"
+  },
+  {
+    "path": "research-final-search/top15-completion.txt",
+    "bytes": 37699,
+    "sha256": "653aa1bc1d86b048109f230f177f0274a08d82291069378ed5b50190bb153166"
+  },
+  {
+    "path": "research-final-search/verification.txt",
+    "bytes": 36927,
+    "sha256": "390a59c3c2049f8ab24a18be784f32c273528fe70ab2569c7815df2af0933920"
+  },
+  {
+    "path": "tmp/pdfs/blackbook-review.png",
+    "bytes": 690976,
+    "sha256": "924e748670418225d6518b87252f7327c695a4ab52158d95d82ef6794f8e1b54"
+  },
+  {
+    "path": "tmp/pdfs/blackbook.txt",
+    "bytes": 48624,
+    "sha256": "549b6ead9c3447a638f29a44bd1de1d30109e301b1f891f229b91c9cf20b3e9b"
+  },
+  {
+    "path": "tmp/pdfs/catalogue-review.png",
+    "bytes": 405102,
+    "sha256": "b3074921dd33ad226390e4d9cf97358da9eb39b0c4f95d6cc7d05482e9e4eab6"
+  },
+  {
+    "path": "tmp/pdfs/catalogue.txt",
+    "bytes": 15951,
+    "sha256": "97d3613aadbd169464f7b8c89a34923c879bae0449964b78295675bf7ce23e67"
+  }
+]
