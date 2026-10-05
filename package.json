@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aven experiment foundation, shared contracts and AVEN-003 storage schema",
+  "description": "Aven experiment foundation, contracts, storage and AVEN-004 Experience Ledger",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24 <25",
@@ -12,7 +12,7 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --project tsconfig.json --noEmit && pnpm --filter @aven/contracts typecheck && pnpm --filter @aven/storage typecheck",
+    "typecheck": "tsc --project tsconfig.json --noEmit && pnpm --filter @aven/contracts typecheck && pnpm --filter @aven/storage typecheck && pnpm --filter @aven/ledger typecheck",
     "db:migrate": "pnpm --filter @aven/storage migrate",
     "db:test": "pnpm --filter @aven/storage test",
     "experiment:check": "node tooling/scripts/check-experiment.ts",

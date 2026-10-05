@@ -3,11 +3,11 @@
 ## Authority and scope
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
-reveals a concrete fatal problem. Current authorized work is **AVEN-003 only**:
-database schema, integrity constraints, migrations, and schema tests. AVEN-001
-is frozen at `9aa52bf` / `aven-001`; AVEN-002 is frozen at `9c05272` /
-`aven-002`. Do not begin AVEN-004 automatically or commit AVEN-003 before
-external review. Existing research outside this repository is historical.
+reveals a concrete fatal problem. Current authorized work is **AVEN-004 only**:
+the append-only Experience Ledger service over frozen AVEN-003 storage. AVEN-001
+through AVEN-003 are frozen; the current baseline is `fd6784d` / `aven-003`. Do
+not begin AVEN-005 or commit AVEN-004 before external review. Existing research
+outside this repository is historical.
 
 Read these sources completely before changing the design:
 
@@ -72,19 +72,22 @@ Consequences:
   isolation. Root process isolation, storage protection, and eval-vault controls
   remain implementation decisions.
 - Run `pnpm check` after relevant changes. Tests cover bootstrap experiment
-  discipline, shared contracts, and SQLite integrity, not an Aven runtime.
-  Report limitations honestly.
+  discipline, shared contracts, SQLite integrity, and Ledger behavior, not a
+  complete Aven runtime. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
 
 `packages/contracts` remains the AVEN-002 domain boundary. `packages/storage`
-adds AVEN-003 SQLite connections, contract serialization, SQL migrations and
+owns AVEN-003 SQLite connections, contract serialization, SQL migrations and
 integrity constraints. SQL migrations are authoritative; do not use schema push.
 Keep the v1 validation/reference projection semantics available for stored v1
-data. Other app/package directories remain placeholders, including `ledger`.
-Tooling schemas still describe experimental metadata only. No Ledger service,
-append/write APIs, retrieval, learning algorithms, provider adapters, Root
-enforcement, API/UI, execution, promotion controller, or orchestration in this
-milestone. Stop after reporting files, checks, assumptions, and deliberate
-deferrals for external review. Do not commit yet.
+data. `packages/ledger` owns owner-bound historical append/read/replay behavior
+over that storage. Replay is observational only. Append success records a claim;
+it does not establish truth, authorize execution, or create derived owner state.
+Other app/package directories remain placeholders. Tooling schemas still
+describe experimental metadata only. No Context Broker, Owner Model retrieval or
+rebuild, learning algorithms, provider adapters, Root enforcement, API/UI,
+execution, promotion controller, or orchestration in this milestone. Stop after
+reporting files, checks, assumptions, and deliberate deferrals for external
+review. Do not commit yet.
