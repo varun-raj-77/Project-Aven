@@ -1,4 +1,5 @@
 * text=auto eol=lf
 *.pdf binary
-# Frozen source artifacts retain their original bytes.
-docs/sources/** -text
+# Frozen source artifacts retain their original bytes (including CRLF line
+# endings); CR before LF is part of the terminator, not trailing whitespace.
+docs/sources/** -text whitespace=cr-at-eol

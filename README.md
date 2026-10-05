@@ -44,6 +44,10 @@ pnpm install --frozen-lockfile --ignore-scripts
 pnpm check
 ```
 
+If `pnpm` is not on `PATH`, prefix each command with `corepack` (for example
+`corepack pnpm check`). Root scripts call the pinned tools directly and never
+invoke a nested `pnpm`.
+
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
 repository tooling, contracts, storage, and Ledger, including compile-time API
