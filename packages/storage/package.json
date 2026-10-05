@@ -1,0 +1,26 @@
+{
+  "name": "@aven/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-003 local SQLite schema, migrations and contract serialization",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/storage/test",
+    "migrate": "node src/migrate-cli.ts"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "better-sqlite3": "13.0.3",
+    "drizzle-orm": "0.45.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

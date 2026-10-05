@@ -9,3 +9,4 @@ results/private/
 .local/
 dist/
 coverage/
+data/

@@ -11,6 +11,10 @@ coverage/
 *.sqlite
 *.sqlite3
 *.db
+data/
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
 *-shm
 *-wal
 evals/datasets/private/

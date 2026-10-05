@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aven experiment foundation and AVEN-002 shared contracts",
+  "description": "Aven experiment foundation, shared contracts and AVEN-003 storage schema",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24 <25",
@@ -12,9 +12,11 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --project tsconfig.json --noEmit && pnpm --filter @aven/contracts typecheck",
+    "typecheck": "tsc --project tsconfig.json --noEmit && pnpm --filter @aven/contracts typecheck && pnpm --filter @aven/storage typecheck",
+    "db:migrate": "pnpm --filter @aven/storage migrate",
+    "db:test": "pnpm --filter @aven/storage test",
     "experiment:check": "node tooling/scripts/check-experiment.ts",
-    "test": "vitest run",
+    "test": "vitest run --configLoader native",
     "check": "pnpm format:check && pnpm typecheck && pnpm experiment:check && pnpm test"
   },
   "devDependencies": {

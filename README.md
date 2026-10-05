@@ -5,11 +5,14 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-002 shared typed contracts, on the frozen AVEN-001
-foundation (`9aa52bf`, tag `aven-001`).** The
-[contracts package](packages/contracts/README.md) defines schemas and types.
-There is no running Aven, API, web app, database, learning engine, or Root
-gateway in this foundation. EXP-001 has not been run.
+**Current scope: AVEN-003 database schema, on the frozen AVEN-002 contracts
+(`9c05272`, tag `aven-002`).** The
+[contracts package](packages/contracts/README.md) defines schemas and types; the
+[storage package](packages/storage/README.md) provides local SQLite schema,
+integrity constraints, and migrations. The
+[AVEN-003 report](docs/AVEN_003_REPORT.md) is ready for external review. There
+is no running Aven, Ledger service, API, web app, learning engine, or Root
+gateway. EXP-001 has not been run.
 
 ## Start here
 
@@ -41,14 +44,18 @@ pnpm check
 
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
-repository tooling and the contracts package, including compile-time ID checks.
-Tests validate contract boundaries, experiment metadata, and freeze gates;
-passing them is not evidence of learning quality or runtime security.
+repository tooling, contracts, and storage, including compile-time ID checks.
+Tests validate contract boundaries, SQLite integrity, experiment metadata, and
+freeze gates; passing them is not evidence of learning quality or runtime
+security.
 
 Dependencies are pinned and locked. Strict TypeScript, Zod metadata validation,
 Prettier, YAML parsing, and Vitest are available at the root. The contracts
-workspace declares its pinned Zod dependency. There is no app framework or model
-SDK. The setup follows the official
+workspace declares its pinned Zod dependency. Storage adds stable Drizzle and
+better-sqlite3; its README records versions and rationale. `pnpm db:test` runs
+database tests. `pnpm db:migrate` creates or migrates the ignored local
+`data/aven.sqlite`; it does not record owner experience. There is no app
+framework or model SDK. The setup follows the official
 [pnpm workspace instructions](https://pnpm.io/workspaces),
 [TypeScript strict configuration](https://www.typescriptlang.org/tsconfig/strict.html),
 [Vitest guide](https://vitest.dev/guide/), and
@@ -65,13 +72,13 @@ aven/
   evals/         datasets, held-out, scorers, regression (placeholders)
   results/       future frozen run artifacts; no results yet
   apps/          api, web (placeholders)
-  packages/      contracts, ledger, owner-model, context-broker, runtime,
+  packages/      contracts, storage, ledger, owner-model, context-broker, runtime,
                  root, learning, eval, test-utils (placeholders)
   tooling/       scripts and bootstrap tests
 ```
 
-`packages/contracts` is an installable private workspace package. Other
-app/package directories remain placeholders containing `.gitkeep` only.
+`packages/contracts` and `packages/storage` are private workspace packages.
+Other app/package directories remain placeholders containing `.gitkeep` only.
 
 ## Experiment and authority
 
@@ -92,6 +99,7 @@ execution. Provider choice and any future remote transfer of owner context
 require an explicit privacy decision. Do not put private data or credentials in
 this repo.
 
-AVEN-003 and every runtime feature remain deferred. Stop after AVEN-002. The
+AVEN-003 stops at schema, migrations, and integrity tests. AVEN-004 and every
+runtime feature remain deferred. Do not commit this milestone before review. The
 AVEN-001 source summaries and experiment documents retain their historical
 milestone context; the current authorization is recorded in `AGENTS.md`.
