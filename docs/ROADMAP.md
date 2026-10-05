@@ -10,8 +10,8 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-002 | Shared typed contracts                                | Implemented; strict schemas and contract checks; no runtime enforcement                                |
 | AVEN-003 | Database schema                                       | Frozen at `aven-003`; SQLite migrations and owner/version/trust/lineage integrity                      |
 | AVEN-004 | Append-only Experience Ledger                         | Frozen at `aven-004`; atomic appends, owner-bound reads, replay, inspection; rebuild tests in AVEN-009 |
-| AVEN-005 | Chat/session API                                      | Awaiting review; loopback sessions, tasks, owner messages via Ledger, history; no model or self-write  |
-| AVEN-006 | Model/runtime abstraction                             | Pending; replaceable foundation model                                                                  |
+| AVEN-005 | Chat/session API                                      | Frozen at `aven-005`; loopback sessions, tasks, owner messages via Ledger, history; no model           |
+| AVEN-006 | Model/runtime abstraction                             | Awaiting review; replaceable runtime boundary, model output as `model_inference`; no live provider     |
 | AVEN-007 | Naive Personalized baseline and prebuilt eval dataset | Pending; strong B and protected cases before learner tuning                                            |
 | AVEN-008 | Context Broker                                        | Pending; relevant scoped retrieval including negative signals                                          |
 | AVEN-009 | Typed Owner Model                                     | Pending; provenance, lifecycle, and rebuildable state; Owner Model rebuild tests over Ledger replay    |
@@ -28,8 +28,9 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-020 | Frozen end-to-end A/B/C experiment                    | Pending; untouched final cases, full outcomes and limitations; evaluate before expansion               |
 
 No framework adapter is required; one is optional only when it directly serves
-the experiment. Current authorization stops after AVEN-005, with no commit
-before external review. AVEN-006 is not authorized by this task.
+the experiment. Current authorization stops after AVEN-006, with no commit
+before external review. AVEN-007 is not authorized by this task; it may add the
+first justified live-model adapter behind the AVEN-006 interface.
 
 ## Longer-term gates, all deferred
 

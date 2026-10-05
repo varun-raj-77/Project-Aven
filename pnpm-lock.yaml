@@ -35,6 +35,9 @@ importers:
       '@aven/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@aven/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@aven/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -73,6 +76,22 @@ importers:
       '@aven/storage':
         specifier: workspace:*
         version: link:../storage
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@24.10.13)(yaml@2.9.1)
+
+  packages/runtime:
+    dependencies:
+      '@aven/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       zod:
         specifier: 4.6.5
         version: 4.6.5

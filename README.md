@@ -5,18 +5,24 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-005 local chat/session API, on frozen AVEN-004 plus
-MAINT-001 (`8479aa1`).** The [contracts package](packages/contracts/README.md)
-defines schemas and types; the [storage package](packages/storage/README.md)
-provides local SQLite schema, integrity constraints, and migrations. The
+**Current scope: AVEN-006 model/runtime abstraction, on frozen AVEN-005
+(`f28994a`, tag `aven-005`).** The
+[contracts package](packages/contracts/README.md) defines schemas and types; the
+[storage package](packages/storage/README.md) provides local SQLite schema,
+integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
 owner-bound reads, observational replay, and integrity inspection. The
 [API app](apps/api/README.md) adds a loopback HTTP boundary for owner-scoped
 sessions, task identities, owner messages recorded through the Ledger, and
-session history. **No model runs and nothing answers a message.** The
-[AVEN-005 report](docs/AVEN_005_REPORT.md) records the external review fixes and
-is ready for final external verification. There is no model runtime, web app,
-learning engine, authentication, or Root gateway. EXP-001 has not been run.
+session history. The [runtime package](packages/runtime/README.md) adds a
+provider-neutral, replaceable `ModelRuntime` boundary with a deterministic
+test-only runtime, and the API app adds a separate in-process recorder that
+stores successful model output as `assistant_response` with `model_inference`
+provenance. **There is no real provider adapter, no network model call, and no
+HTTP route that generates a response.** The
+[AVEN-006 report](docs/AVEN_006_REPORT.md) awaits external review. There is no
+web app, Context Broker, Owner Model, learning engine, authentication, or Root
+gateway. EXP-001 has not been run.
 
 ## Start here
 
@@ -52,22 +58,23 @@ invoke a nested `pnpm`.
 
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
-repository tooling, contracts, storage, Ledger, and the API app, including
-compile-time API checks. Tests validate contract boundaries, SQLite and Ledger
-integrity, experiment metadata, and freeze gates; passing them is not evidence
-of learning quality or runtime security.
+repository tooling, contracts, storage, Ledger, runtime, and the API app,
+including compile-time API checks. Tests validate contract boundaries, SQLite
+and Ledger integrity, experiment metadata, and freeze gates; passing them is not
+evidence of learning quality or runtime security.
 
 Dependencies are pinned and locked. Strict TypeScript, Zod metadata validation,
 Prettier, YAML parsing, and Vitest are available at the root. The contracts
 workspace declares its pinned Zod dependency. Storage adds stable Drizzle and
 better-sqlite3; its README records versions and rationale. `pnpm db:test` runs
-database tests; `pnpm --filter @aven/ledger test` runs Ledger tests.
+database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
+`pnpm --filter @aven/runtime test` runs runtime-boundary tests.
 `pnpm db:migrate` creates or migrates the ignored local `data/aven.sqlite`; it
 does not record owner experience. `pnpm api:start --owner owner_local` declares
 a local owner and serves the AVEN-005 API on `127.0.0.1:4317` (loopback only);
 `pnpm --filter @aven/api test` runs its tests. The API uses Node's built-in
-`http` module. There is no app framework or model SDK. The setup follows the
-official [pnpm workspace instructions](https://pnpm.io/workspaces),
+`http` module. There is no app framework or model/provider SDK. The setup
+follows the official [pnpm workspace instructions](https://pnpm.io/workspaces),
 [TypeScript strict configuration](https://www.typescriptlang.org/tsconfig/strict.html),
 [Vitest guide](https://vitest.dev/guide/), and
 [Zod documentation](https://zod.dev/).
@@ -82,15 +89,16 @@ aven/
   experiments/   hypotheses and pre-specified protocols
   evals/         datasets, held-out, scorers, regression (placeholders)
   results/       future frozen run artifacts; no results yet
-  apps/          api (AVEN-005 local session API), web (placeholder)
-  packages/      contracts, storage, ledger, owner-model, context-broker, runtime,
-                 root, learning, eval, test-utils (placeholders)
+  apps/          api (AVEN-005 local session API + AVEN-006 response recorder),
+                 web (placeholder)
+  packages/      contracts, storage, ledger, runtime (AVEN-006); owner-model,
+                 context-broker, root, learning, eval, test-utils (placeholders)
   tooling/       scripts and bootstrap tests
 ```
 
-`packages/contracts`, `packages/storage`, `packages/ledger`, and `apps/api` are
-private workspace packages. Other app/package directories remain placeholders
-containing `.gitkeep` only.
+`packages/contracts`, `packages/storage`, `packages/ledger`, `packages/runtime`,
+and `apps/api` are private workspace packages. Other app/package directories
+remain placeholders containing `.gitkeep` only.
 
 ## Experiment and authority
 
@@ -113,7 +121,9 @@ this repo.
 
 AVEN-005 stops at the local session/message/history boundary. Owner identity is
 declared, not authenticated, and accepting a message authorizes nothing.
-AVEN-006 and later work remain deferred. Do not commit this milestone before
-review. The AVEN-001 source summaries and experiment documents retain their
-historical milestone context; the current authorization is recorded in
+AVEN-006 adds only the replaceable runtime boundary and the model-output
+recording path; model output is data, never owner input, permission, or learned
+state. AVEN-007 and later work remain deferred. Do not commit this milestone
+before review. The AVEN-001 source summaries and experiment documents retain
+their historical milestone context; the current authorization is recorded in
 `AGENTS.md`.

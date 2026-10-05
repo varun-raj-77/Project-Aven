@@ -1,0 +1,23 @@
+{
+  "name": "@aven/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-006 provider-neutral model runtime boundary; no provider adapter, network, storage or Ledger access",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/scripted.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/runtime/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

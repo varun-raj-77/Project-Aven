@@ -4,12 +4,20 @@ import { describe, expect, it } from 'vitest';
 /**
  * Static REGRESSION TRIPWIRES over the API source, not security guarantees.
  *
- * They make obvious regressions visible in review: a model/network/tool import,
- * a direct write that bypasses the Experience Ledger, a new event type, or a
- * rewrite/delete route. They are pattern checks over source text and can be
- * bypassed by deliberately obfuscated code; the runtime tests remain the
- * evidence for behavior. Each rule below is also run against a known-bad sample
- * so a weakened rule fails here instead of silently passing.
+ * They make obvious regressions visible in review: a provider/network/tool
+ * import, a direct write that bypasses the Experience Ledger, a new event type,
+ * owner input and model output sharing a recording path, or a rewrite/delete
+ * route. They are pattern checks over source text and can be bypassed by
+ * deliberately obfuscated code; the runtime tests remain the evidence for
+ * behavior. Each rule below is also run against a known-bad sample so a
+ * weakened rule fails here instead of silently passing.
+ *
+ * AVEN-006 legitimately adds model-runtime terminology in exactly one file,
+ * `assistant-response.ts`. The AVEN-005 "no assistant_response/model_inference
+ * anywhere" rule is replaced by per-path rules: the owner-message path still
+ * records only owner_request/explicit_owner_statement and never touches the
+ * runtime; the response recorder records only assistant_response/
+ * model_inference and never touches the owner path; HTTP never reaches it.
  */
 const srcDir = new URL('../src/', import.meta.url);
 const files = readdirSync(srcDir).filter((f) => f.endsWith('.ts'));
@@ -51,7 +59,78 @@ const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'LedgerError',
     'LedgerErrorCode',
   ]),
+  // Production runtime entry only; '@aven/runtime/testing' is not allowlisted.
+  '@aven/runtime': new Set([
+    'invokeModelRuntime',
+    'InvokeOptionsSchema',
+    'isModelRuntimeErrorCode',
+    'ModelRuntimeError',
+    'ModelRuntimeRequestSchema',
+    'FinishReason',
+    'ModelRuntime',
+    'ModelRuntimeErrorCode',
+    'ModelRuntimeResult',
+  ]),
 };
+/** The AVEN-005 owner-input path and the AVEN-006 model-output path. */
+const OWNER_PATH = 'service.ts';
+const RESPONSE_PATH = 'assistant-response.ts';
+/** Every non-owner provenance kind and every event type other than owner_request. */
+const OTHER_PROVENANCE =
+  /model_inference|system_generated|owner_approval|owner_correction|explicit_owner_correction|tool_result|external_content/;
+const RUNTIME_TERMS =
+  /assistant_response|model_inference|@aven\/runtime|ModelRuntime|invokeModelRuntime|generateResponse|assistant-response/;
+
+function literals(text: string, pattern: RegExp): string[] {
+  return [...text.matchAll(pattern)].map((m) => m[1] ?? '');
+}
+const eventTypes = (text: string) => literals(text, /eventType:\s*'(\w+)'/g);
+const provenanceKinds = (text: string) =>
+  literals(text, /kind:\s*'(\w+)'\s+as const/g);
+
+/** owner_request + explicit_owner_statement only; no runtime or model terms. */
+function ownerPathViolations(text: string): string[] {
+  const found: string[] = [];
+  for (const t of eventTypes(text))
+    if (t !== 'owner_request') found.push(`eventType ${t}`);
+  for (const k of provenanceKinds(text))
+    if (k !== 'explicit_owner_statement') found.push(`provenance ${k}`);
+  if (OTHER_PROVENANCE.test(text)) found.push('non-owner provenance');
+  if (RUNTIME_TERMS.test(text)) found.push('runtime term');
+  return found;
+}
+/** assistant_response + model_inference only; never the owner path. */
+function responsePathViolations(text: string): string[] {
+  const found: string[] = [];
+  for (const t of eventTypes(text))
+    if (t !== 'assistant_response') found.push(`eventType ${t}`);
+  for (const k of provenanceKinds(text))
+    if (k !== 'model_inference') found.push(`provenance ${k}`);
+  if (
+    /owner_request|explicit_owner_statement|system_generated|owner_approval|owner_correction|tool_result|external_content/.test(
+      text,
+    )
+  )
+    found.push('non-model event or provenance');
+  if (/submitOwnerMessage|createApiService|createRequestHandler/.test(text))
+    found.push('owner-message path');
+  if (/from\s+'\.\/(service|http|server|cli)\.ts'/.test(text))
+    found.push('imports owner/HTTP module');
+  if (/@aven\/runtime\/testing|createScriptedModelRuntime/.test(text))
+    found.push('test runtime');
+  return found;
+}
+/** Every other module constructs no event or provenance and never reaches the runtime, except index re-exports. */
+function otherFileViolations(file: string, text: string): string[] {
+  const found: string[] = [];
+  if (eventTypes(text).length) found.push('eventType');
+  if (provenanceKinds(text).length) found.push('provenance kind');
+  if (/assistant_response|model_inference/.test(text))
+    found.push('model event or provenance');
+  if (file !== 'index.ts' && RUNTIME_TERMS.test(text))
+    found.push('runtime term');
+  return found;
+}
 
 /** The only tables the API may write directly. History goes through the Ledger. */
 const IDENTITY_TABLES = new Set(['owners', 'sessions', 'tasks']);
@@ -206,7 +285,7 @@ function directWriteViolations(text: string, checkSchemaRefs = true): string[] {
 
 const all = Object.values(source).join('\n');
 
-describe('AVEN-005 API static regression tripwires (not runtime security)', () => {
+describe('AVEN-005/006 API static regression tripwires (not runtime security)', () => {
   it('imports only allowlisted names from local, storage, Ledger, contract and validation modules', () => {
     expect(importViolations(all)).toEqual([]);
     // node:net is used for a type only.
@@ -251,9 +330,16 @@ describe('AVEN-005 API static regression tripwires (not runtime security)', () =
       (m) => m[1],
     );
     expect(new Set(inserts)).toEqual(IDENTITY_TABLES);
-    // The single historical write is a Ledger append bound to the path owner.
-    expect([...all.matchAll(/\bappendEvent\s*\(/g)]).toHaveLength(1);
-    expect(all).toMatch(/createLedger\(storage, ownerId\)\.appendEvent\(/);
+    // Exactly two historical writes: one Ledger append per recording path,
+    // each bound to the validated owner. Nothing else appends.
+    expect([...all.matchAll(/\bappendEvent\s*\(/g)]).toHaveLength(2);
+    for (const file of [OWNER_PATH, RESPONSE_PATH]) {
+      const text = source[file]!;
+      expect([...text.matchAll(/\bappendEvent\s*\(/g)], file).toHaveLength(1);
+      expect(text, file).toMatch(
+        /createLedger\(storage, ownerId\)\.appendEvent\(/,
+      );
+    }
     for (const bad of [
       `const ev = schema.experienceEvents; db.insert(ev).values(row).run();`,
       `const { evidence: e } = schema; db.insert(e).values(row).run();`,
@@ -276,18 +362,54 @@ describe('AVEN-005 API static regression tripwires (not runtime security)', () =
       expect(directWriteViolations(bad), bad).not.toEqual([]);
   });
 
-  it('constructs only owner_request events with explicit owner-statement provenance', () => {
-    const eventTypes = [...all.matchAll(/eventType:\s*'(\w+)'/g)].map(
-      (m) => m[1],
-    );
-    expect(new Set(eventTypes)).toEqual(new Set(['owner_request']));
-    const provenanceKinds = [
-      ...all.matchAll(/kind:\s*'(\w+)'\s+as const/g),
-    ].map((m) => m[1]);
-    expect(provenanceKinds).toEqual(['explicit_owner_statement']);
-    expect(all).not.toMatch(
-      /assistant_response|model_inference|system_generated|owner_approval|owner_correction|tool_result|external_content/,
-    );
+  it('owner-message path constructs only owner_request events with explicit owner-statement provenance and never reaches a runtime', () => {
+    const text = source[OWNER_PATH]!;
+    expect(new Set(eventTypes(text))).toEqual(new Set(['owner_request']));
+    expect(provenanceKinds(text)).toEqual(['explicit_owner_statement']);
+    expect(ownerPathViolations(text)).toEqual([]);
+    for (const bad of [
+      `eventType: 'assistant_response',`,
+      `const provenance = { kind: 'model_inference' as const };`,
+      `const provenance = { kind: 'system_generated' as const };`,
+      `import { invokeModelRuntime } from '@aven/runtime';`,
+      `await responses.generateResponse(input);`,
+      `import { x } from './assistant-response.ts';`,
+    ])
+      expect(ownerPathViolations(bad), bad).not.toEqual([]);
+  });
+
+  it('response recorder constructs only assistant_response events with model_inference provenance and never uses the owner path', () => {
+    const text = source[RESPONSE_PATH]!;
+    expect(new Set(eventTypes(text))).toEqual(new Set(['assistant_response']));
+    expect(provenanceKinds(text)).toEqual(['model_inference']);
+    expect(responsePathViolations(text)).toEqual([]);
+    expect(text).toMatch(/invokeModelRuntime\(runtime, request,/);
+    for (const bad of [
+      `eventType: 'owner_request',`,
+      `const provenance = { kind: 'explicit_owner_statement' as const };`,
+      `const p = { kind: 'owner_approval', ownerId };`,
+      `service.submitOwnerMessage(owner, session, task, { text });`,
+      `import { createApiService } from './service.ts';`,
+      `import { createScriptedModelRuntime } from '@aven/runtime/testing';`,
+      `eventType: 'tool_execution',`,
+    ])
+      expect(responsePathViolations(bad), bad).not.toEqual([]);
+  });
+
+  it('no other module constructs events or provenance, and HTTP never reaches the runtime or response recorder', () => {
+    for (const [file, text] of Object.entries(source))
+      if (file !== OWNER_PATH && file !== RESPONSE_PATH)
+        expect(otherFileViolations(file, text), file).toEqual([]);
+    expect(
+      Object.keys(source).filter((f) => /@aven\/runtime/.test(source[f]!)),
+    ).toEqual([RESPONSE_PATH]);
+    for (const bad of [
+      `import { createAssistantResponseService } from './assistant-response.ts';`,
+      `const p = { kind: 'model_inference' as const };`,
+      `eventType: 'assistant_response',`,
+      `import { invokeModelRuntime } from '@aven/runtime';`,
+    ])
+      expect(otherFileViolations('http.ts', bad), bad).not.toEqual([]);
   });
 
   it('registers only GET and POST handlers', () => {

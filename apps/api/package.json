@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-005 local owner-scoped chat/session API boundary; no model execution",
+  "description": "AVEN-005 local owner-scoped chat/session API boundary and AVEN-006 in-process assistant-response recorder; no generation route",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -15,6 +15,7 @@
   "dependencies": {
     "@aven/contracts": "workspace:*",
     "@aven/ledger": "workspace:*",
+    "@aven/runtime": "workspace:*",
     "@aven/storage": "workspace:*",
     "drizzle-orm": "0.45.3",
     "zod": "4.6.5"

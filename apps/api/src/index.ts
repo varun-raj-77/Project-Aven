@@ -13,6 +13,21 @@ export {
 } from './service.ts';
 export type { SessionRecord, TaskRecord } from './identity-store.ts';
 export {
+  createAssistantResponseService,
+  AssistantResponseError,
+  ASSISTANT_RESPONSE_COMPONENT,
+  ASSISTANT_RESPONSE_VERSION,
+  MAX_DERIVED_FROM,
+  type AssistantResponseService,
+  type AssistantResponseServiceOptions,
+  type AssistantResponseReceipt,
+  type AssistantResponseErrorCode,
+  type AssistantResponseStage,
+  type GenerateResponseInput,
+  type GenerateResponseOptions,
+  type ResponseIdPrefix,
+} from './assistant-response.ts';
+export {
   createRequestHandler,
   type HandlerOptions,
   type ErrorLogEntry,
