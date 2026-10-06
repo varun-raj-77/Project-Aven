@@ -1,0 +1,78 @@
+export {
+  CONTEXT_BROKER_CONFIG_V1,
+  CONTEXT_BROKER_CONFIG_VERSION,
+  CONTEXT_BROKER_VERSION,
+  CONTEXT_SOURCE_KINDS,
+  FRESHNESS_HALF_LIFE_DAYS,
+  MAX_CANDIDATES_PER_SOURCE,
+  MAX_SELECTED_CONTEXT_CHARS,
+  MAX_SELECTED_ITEMS,
+  MAX_SINGLE_CONTEXT_ITEM_CHARS,
+  MAX_SOURCES,
+  MAX_TOTAL_CANDIDATES,
+  PROVENANCE_FACTORS,
+  RANKING_FACTORS,
+  RANKING_WEIGHTS_BASIS_POINTS,
+  RELEVANCE_VERSION,
+  SCOPE_FACTORS,
+  TOKENIZER_VERSION,
+  TRUST_FACTORS,
+  type ContextBrokerConfiguration,
+  type ContextSourceKind,
+  type RankingFactor,
+} from './config.ts';
+export {
+  CONTEXT_BROKER_ERROR_CODES,
+  ContextBrokerError,
+  type ContextBrokerErrorCode,
+} from './errors.ts';
+export {
+  CandidateSignalsSchema,
+  ContextCandidateSchema,
+  ContextRequestSchema,
+  LocalIdSchema,
+  TaskDescriptorSchema,
+  type CandidateSignals,
+  type ContextCandidate,
+  type ContextRequest,
+  type TaskDescriptor,
+} from './types.ts';
+export {
+  extractQueryTerms,
+  isQualifierTerm,
+  lexicalRelevance,
+  pluralFold,
+  QUALIFIER_TERMS_V1,
+  STOPWORDS_V1,
+  tokenize,
+  type LexicalRelevance,
+  type QueryTerms,
+} from './relevance.ts';
+export {
+  normalizeLabel,
+  type ScopeAssessment,
+  type ScopeDimension,
+  type ScopeStatus,
+} from './scope.ts';
+export {
+  type FreshnessAssessment,
+  type ScoreBreakdown,
+  type TrustBasis,
+} from './ranking.ts';
+export {
+  createContextBroker,
+  EXCLUSION_REASONS,
+  type BudgetUsage,
+  type ContextAssembly,
+  type ContextBroker,
+  type ContextBrokerOptions,
+  type ContextBrokerTrace,
+  type ContextBundle,
+  type ContextBundleItem,
+  type ContextSource,
+  type ContextSourceQuery,
+  type ExclusionReason,
+  type RelevanceChannel,
+  type TraceCandidate,
+  type TraceSource,
+} from './broker.ts';
