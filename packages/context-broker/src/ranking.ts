@@ -14,7 +14,7 @@ import type { ParsedContextCandidate } from './types.ts';
 import { quantize } from './util.ts';
 
 /**
- * Ranking v1: one transparent, fixed composite rule.
+ * Ranking (unchanged from config v1): one transparent, fixed composite rule.
  *
  *   composite = sum over the seven factors of weight * factor
  *   final     = composite * (1 - negativeRetrieval)
@@ -24,7 +24,7 @@ import { quantize } from './util.ts';
  * relevance floor) is decided BEFORE ranking and is never a low score.
  */
 
-export type ScopeFactorStatus = Exclude<ScopeStatus, 'mismatch'>;
+export type ScopeFactorStatus = Exclude<ScopeStatus, 'mismatch' | 'unresolved'>;
 
 export function scopeFactor(status: ScopeFactorStatus): number {
   return SCOPE_FACTORS[status];

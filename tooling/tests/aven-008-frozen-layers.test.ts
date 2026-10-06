@@ -18,6 +18,9 @@ import { describe, expect, it } from 'vitest';
  * A later milestone explicitly authorized to change one of these files
  * updates this table in the same reviewed change. Files are compared
  * byte-for-byte (the repository checks text out with LF line endings).
+ *
+ * Reconciliation (review M-static): the directory check also walks every
+ * frozen tree recursively, so a file added in a NEW nested directory fails.
  */
 const repoRoot = new URL('../../', import.meta.url);
 const FROZEN_AT_AVEN_007: Record<string, string> = {
@@ -405,6 +408,38 @@ describe('AVEN-008 frozen layers (tooling tripwire, not runtime security)', () =
         .map((entry) => `${dir}/${entry.name}`),
     );
     expect(present.filter((f) => !(f in FROZEN_AT_AVEN_007))).toEqual([]);
+  });
+
+  it('adds no file anywhere under a frozen package, dataset, protocol or source tree (nested too)', () => {
+    const roots = [
+      'apps/api',
+      'docs/sources',
+      'evals/aven-007',
+      'experiments/EXP-001',
+      'packages/baseline',
+      'packages/contracts',
+      'packages/ledger',
+      'packages/runtime',
+      'packages/storage',
+    ];
+    const walk = (dir: string): string[] =>
+      readdirSync(new URL(`${dir}/`, repoRoot), {
+        withFileTypes: true,
+      }).flatMap((entry) => {
+        const path = `${dir}/${entry.name}`;
+        // Installed dependency links are not repository content.
+        if (entry.name === 'node_modules' || entry.isSymbolicLink()) return [];
+        return entry.isDirectory() ? walk(path) : [path];
+      });
+    const present = roots.flatMap(walk);
+    expect(present.length).toBeGreaterThan(100);
+    expect(present.filter((f) => !(f in FROZEN_AT_AVEN_007))).toEqual([]);
+    // The walk itself detects a nested addition.
+    expect(
+      ['packages/baseline/src/extra/new.ts'].filter(
+        (f) => !(f in FROZEN_AT_AVEN_007),
+      ),
+    ).toHaveLength(1);
   });
 
   it('pins the frozen AVEN-007 baseline and dataset that AVEN-008 must not depend on or edit', () => {

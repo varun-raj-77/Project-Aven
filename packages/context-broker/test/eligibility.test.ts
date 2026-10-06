@@ -120,11 +120,8 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
     const excluded = traceOf(result, 'interview-terse');
     expect(excluded.exclusionReason).toBe('scope_mismatch');
     expect(excluded.scope.mismatched).toEqual(['domain', 'taskType']);
-    expect(excluded.relevance.matchedTerms).toEqual([
-      'interview',
-      'live',
-      'question',
-    ]);
+    // interview, live, question: three matched terms, counted not echoed.
+    expect(excluded.relevance.matchedTermCount).toBe(3);
     expect(excluded.score).toBeNull();
     expect(traceOf(result, 'report-style').scope.status).toBe('label_match');
   });
@@ -187,7 +184,7 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
       status: 'label_match',
       matched: ['domain', 'temporal'],
       mismatched: [],
-      indeterminate: [],
+      unresolved: [],
     });
     expect(selectedIds(result).sort()).toEqual([
       'current-window',
@@ -195,7 +192,7 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
     ]);
   });
 
-  it('treats uncertain scope as undetermined unless every possibility mismatches', async () => {
+  it('applies uncertain scope only when every possibility is satisfied (scope rules v2)', async () => {
     const result = await assemble(
       [
         memorySource('store', 'owner_state', [
@@ -219,6 +216,16 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
               ],
             },
           }),
+          ownerState('all-satisfied', 'Travel packing list', 'trusted', {
+            scope: {
+              kind: 'uncertain',
+              reason: 'Synthetic: two candidate scopes',
+              possibilities: [
+                { kind: 'bounded', domain: 'travel' },
+                { kind: 'bounded', taskId: TASK },
+              ],
+            },
+          }),
         ]),
       ],
       request('Update the travel packing list', {
@@ -228,13 +235,17 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
     expect(traceOf(result, 'all-mismatch').exclusionReason).toBe(
       'scope_mismatch',
     );
-    const uncertain = traceOf(result, 'some-match');
+    // One possibility mismatching (cooking) leaves applicability unresolved.
+    expect(traceOf(result, 'some-match').exclusionReason).toBe(
+      'scope_unresolved',
+    );
+    const uncertain = traceOf(result, 'all-satisfied');
     expect(uncertain.scope.status).toBe('uncertain');
     expect(uncertain.score!.factors.scope).toBe(0.25);
     expect(uncertain.channels).toEqual(['lexical_content_term']);
   });
 
-  it('handles global, unknown, indeterminate and partial scope deterministically (H)', async () => {
+  it('handles global, unknown and unresolved bounded scope deterministically (H, H4)', async () => {
     const text = 'Itinerary notes for the coastal trip';
     const result = await assemble(
       [
@@ -260,20 +271,23 @@ describe('AVEN-008 eligibility: task binding and declarative scope', () => {
     const scope = (id: string) => traceOf(result, id).scope;
     expect(scope('global').status).toBe('global');
     expect(scope('unknown').status).toBe('unknown');
+    // v2: a declared restriction the request does not resolve (taskType) is
+    // never evidence of applicability, even with the domain matching.
     expect(scope('partial')).toEqual({
-      status: 'partial_label_match',
+      status: 'unresolved',
       matched: ['domain'],
       mismatched: [],
-      indeterminate: ['taskType'],
+      unresolved: ['taskType'],
     });
-    expect(scope('indeterminate').status).toBe('indeterminate');
+    expect(traceOf(result, 'partial').exclusionReason).toBe('scope_unresolved');
+    // Lexical overlap does not rescue an unresolved bounded scope.
+    expect(scope('indeterminate').status).toBe('unresolved');
+    expect(traceOf(result, 'indeterminate').relevance.score).toBeGreaterThan(0);
+    expect(traceOf(result, 'indeterminate').exclusionReason).toBe(
+      'scope_unresolved',
+    );
     expect(traceOf(result, 'global').score!.factors.scope).toBe(0.5);
     expect(traceOf(result, 'unknown').score!.factors.scope).toBe(0.25);
-    expect(traceOf(result, 'indeterminate').score!.factors.scope).toBe(0.25);
-    expect(traceOf(result, 'partial').score!.factors.scope).toBe(0.75);
-    // A partial explicit label match is a relevance channel without lexical overlap.
-    expect(traceOf(result, 'partial').relevance.score).toBe(0);
-    expect(traceOf(result, 'partial').channels).toEqual(['scope_label']);
     // Global and unknown scope never qualify without task relevance.
     for (const id of ['global-unrelated', 'unknown-unrelated'])
       expect(traceOf(result, id).exclusionReason).toBe('no_relevance_channel');
@@ -414,9 +428,10 @@ describe('AVEN-008 eligibility: supersession, revocation, negative signals, rele
     expect(selectedIds(result)).toEqual(['relevant']);
     for (const id of ['trusted-unrelated', 'qualifier-only'])
       expect(traceOf(result, id).exclusionReason).toBe('no_relevance_channel');
-    expect(traceOf(result, 'qualifier-only').relevance.matchedTerms).toEqual([
-      'not',
-    ]);
+    expect(traceOf(result, 'qualifier-only').relevance).toMatchObject({
+      matchedTermCount: 1,
+      matchedContentTermCount: 0,
+    });
   });
 
   it('excludes items timestamped after the reference time; an equal time is age zero', async () => {

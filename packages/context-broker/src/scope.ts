@@ -1,30 +1,40 @@
 import type { ParsedContextCandidate, ParsedContextRequest } from './types.ts';
 
 /**
- * Declarative scope matching v1. Deterministic label comparison only: no
- * semantic scope inference, no ontology, no synonym or hierarchy resolution.
- * Labels are compared after NFKC normalization, locale-independent
- * lowercasing, trimming and whitespace collapsing, by exact equality.
+ * Declarative scope matching, scope rules v2 (`aven-008-scope-v2`).
+ * Deterministic label comparison only: no semantic scope inference, no
+ * ontology, no synonym or hierarchy resolution. Labels are compared after NFKC
+ * normalization, locale-independent lowercasing, trimming and whitespace
+ * collapsing, by exact equality.
  *
- * Dimensions of a frozen AVEN-002 bounded scope are compared with the request:
- *   - `taskId`          against the request's task ID (always comparable);
+ * Each dimension DECLARED by a frozen AVEN-002 bounded scope is a restriction:
+ *   - `taskId`          vs the request's task ID (always comparable);
  *   - `domain`, `taskType`, `recipient`, `entity`, `context`
- *                       against the request's task descriptor; a label the
- *                       request does not declare is INDETERMINATE, never a
- *                       wildcard match;
- *   - `temporal`        `[from, until)` against the request's reference time;
- *                       it can only exclude, never establish a match.
- * Any explicit mismatch makes the whole candidate ineligible: high lexical
- * relevance can never rescue it.
+ *                       vs the request's task descriptor; a label the request
+ *                       does not declare is UNRESOLVED, never a match;
+ *   - `temporal`        `[from, until)` vs the request's reference time.
+ *
+ * Conservative rule (v2): a bounded scope applies only when EVERY declared
+ * restriction is satisfied. Any explicit mismatch -> `mismatch`; otherwise any
+ * unresolved restriction -> `unresolved`. Both are eligibility exclusions:
+ * lexical relevance cannot rescue them and an exact task binding does not
+ * clear an unresolved restriction. (v1 accepted a partial match, e.g. a
+ * domain + recipient preference when only the domain was declared.)
+ *
+ * An uncertain scope applies only when every possibility is satisfied; if all
+ * possibilities mismatch it is a `mismatch`, otherwise `unresolved`.
+ *
+ * Session-wide scope ("any task in this session") has no frozen AVEN-002
+ * representation and is deliberately not invented here; task-bound references
+ * must match the exact session AND task.
  */
 export type ScopeStatus =
   | 'task_match'
   | 'label_match'
-  | 'partial_label_match'
   | 'global'
-  | 'indeterminate'
   | 'unknown'
   | 'uncertain'
+  | 'unresolved'
   | 'mismatch';
 
 export type ScopeDimension =
@@ -41,14 +51,14 @@ export interface ScopeAssessment {
   readonly status: ScopeStatus;
   readonly matched: readonly ScopeDimension[];
   readonly mismatched: readonly ScopeDimension[];
-  readonly indeterminate: readonly ScopeDimension[];
+  readonly unresolved: readonly ScopeDimension[];
 }
 
 type BoundedScope = Extract<
   ParsedContextCandidate['scope'],
   { kind: 'bounded' }
 >;
-type Outcome = 'matched' | 'mismatched' | 'indeterminate';
+type Outcome = 'matched' | 'mismatched' | 'unresolved';
 
 export function normalizeLabel(label: string): string {
   return label.normalize('NFKC').toLowerCase().trim().replace(/\s+/gu, ' ');
@@ -59,7 +69,7 @@ function compareLabel(
   requested: string | undefined,
 ): Outcome | undefined {
   if (candidate === undefined) return undefined;
-  if (requested === undefined) return 'indeterminate';
+  if (requested === undefined) return 'unresolved';
   return normalizeLabel(candidate) === normalizeLabel(requested)
     ? 'matched'
     : 'mismatched';
@@ -112,23 +122,24 @@ function assessBounded(
     Object.freeze(outcomes.filter(([, v]) => v === o).map(([d]) => d));
   const matched = pick('matched');
   const mismatched = pick('mismatched');
-  const indeterminate = pick('indeterminate');
-  // Temporal can only exclude; it never counts as a positive scope match.
-  const positive = matched.filter((d) => d !== 'temporal');
+  const unresolved = pick('unresolved');
   const status: ScopeStatus =
     mismatched.length > 0
       ? 'mismatch'
-      : positive.includes('taskId')
-        ? 'task_match'
-        : positive.length > 0 && indeterminate.length === 0
-          ? 'label_match'
-          : positive.length > 0
-            ? 'partial_label_match'
-            : 'indeterminate';
-  return Object.freeze({ status, matched, mismatched, indeterminate });
+      : unresolved.length > 0
+        ? 'unresolved'
+        : matched.includes('taskId')
+          ? 'task_match'
+          : 'label_match';
+  return Object.freeze({ status, matched, mismatched, unresolved });
 }
 
 const none: readonly ScopeDimension[] = Object.freeze([]);
+const plain = (status: ScopeStatus): ScopeAssessment =>
+  Object.freeze({ status, matched: none, mismatched: none, unresolved: none });
+
+const union = (lists: readonly (readonly ScopeDimension[])[]) =>
+  Object.freeze([...new Set(lists.flat())].sort());
 
 /** Assesses the candidate's declared scope against the request (not task binding). */
 export function assessScope(
@@ -138,35 +149,28 @@ export function assessScope(
   const scope = candidate.scope;
   switch (scope.kind) {
     case 'global':
-      return Object.freeze({
-        status: 'global',
-        matched: none,
-        mismatched: none,
-        indeterminate: none,
-      });
+      return plain('global');
     case 'unknown':
-      return Object.freeze({
-        status: 'unknown',
-        matched: none,
-        mismatched: none,
-        indeterminate: none,
-      });
+      return plain('unknown');
     case 'uncertain': {
-      // Uncertain scope is excluded only if EVERY possibility explicitly
-      // mismatches; otherwise it stays undetermined (never a positive match).
       const possibilities = scope.possibilities.map((p) =>
         assessBounded(p, request),
       );
-      const allMismatch = possibilities.every((p) => p.status === 'mismatch');
+      const satisfied = (p: ScopeAssessment) =>
+        p.status === 'task_match' || p.status === 'label_match';
+      if (possibilities.every(satisfied)) return plain('uncertain');
+      if (possibilities.every((p) => p.status === 'mismatch'))
+        return Object.freeze({
+          status: 'mismatch',
+          matched: none,
+          mismatched: union(possibilities.map((p) => p.mismatched)),
+          unresolved: none,
+        });
       return Object.freeze({
-        status: allMismatch ? 'mismatch' : 'uncertain',
+        status: 'unresolved',
         matched: none,
-        mismatched: allMismatch
-          ? Object.freeze(
-              [...new Set(possibilities.flatMap((p) => p.mismatched))].sort(),
-            )
-          : none,
-        indeterminate: none,
+        mismatched: none,
+        unresolved: union(possibilities.map((p) => p.unresolved)),
       });
     }
     case 'bounded':
@@ -178,30 +182,30 @@ export function assessScope(
  * Task-bound references (active task state, current instruction) belong to
  * exactly one session and task. They are usable only for that exact binding.
  */
-export function taskBinding(
-  candidate: ParsedContextCandidate,
-): { sessionId: string; taskId: string } | undefined {
-  const reference = candidate.reference;
-  return reference.kind === 'active_task_state' ||
-    reference.kind === 'current_instruction'
-    ? reference.task
-    : undefined;
-}
-
 export function taskBindingMatches(
   candidate: ParsedContextCandidate,
   request: ParsedContextRequest,
 ): boolean | undefined {
-  const binding = taskBinding(candidate);
-  if (binding === undefined) return undefined;
+  const reference = candidate.reference;
+  if (
+    reference.kind !== 'active_task_state' &&
+    reference.kind !== 'current_instruction'
+  )
+    return undefined;
   return (
-    binding.sessionId === request.task.sessionId &&
-    binding.taskId === request.task.taskId
+    reference.task.sessionId === request.task.sessionId &&
+    reference.task.taskId === request.task.taskId
   );
 }
 
-/** A matching task binding upgrades any non-mismatch scope to an exact task match. */
+/**
+ * A matching task binding makes an otherwise APPLICABLE scope (global,
+ * unknown, uncertain-satisfied or fully matched labels) an exact task match.
+ * It never clears `unresolved` or `mismatch`.
+ */
 export function withTaskBinding(assessment: ScopeAssessment): ScopeAssessment {
+  if (assessment.status === 'unresolved' || assessment.status === 'mismatch')
+    return assessment;
   return Object.freeze({
     status: 'task_match',
     matched: Object.freeze<ScopeDimension[]>([
@@ -209,6 +213,6 @@ export function withTaskBinding(assessment: ScopeAssessment): ScopeAssessment {
       ...assessment.matched,
     ]),
     mismatched: assessment.mismatched,
-    indeterminate: assessment.indeterminate,
+    unresolved: assessment.unresolved,
   });
 }

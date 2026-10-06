@@ -29,9 +29,10 @@ sources, with an observable trace; it is read/compute-only and not a prompt,
 owner memory or authority. **There is no real provider adapter, no network model
 call, no HTTP route that generates a response, and no experimental result: the
 dataset's execution status is `not_run`.** The
-[AVEN-008 report](docs/AVEN_008_REPORT.md) awaits external review. There is no
-web app, typed Owner Model, correction engine, learning engine, scorer,
-authentication, or Root gateway. EXP-001 has not been run.
+[AVEN-008 report](docs/AVEN_008_REPORT.md) (configuration v2, after independent
+review) awaits final external verification. There is no web app, typed Owner
+Model, correction engine, learning engine, scorer, authentication, or Root
+gateway. EXP-001 has not been run.
 
 ## Start here
 

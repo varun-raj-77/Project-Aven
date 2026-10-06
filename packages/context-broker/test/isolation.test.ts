@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ContextBrokerError,
+  MAX_CANDIDATES_PER_SOURCE,
+  MAX_RAW_ITEMS_PER_SOURCE,
+  MAX_TOTAL_CANDIDATES,
+} from '../src/index.ts';
+import {
   assemble,
   evidence,
   OTHER_OWNER,
@@ -13,21 +19,26 @@ import {
 
 // SYNTHETIC owners and text only.
 const REQUEST = 'Draft the venue booking checklist for the spring offsite';
+const foreignRecord = (id: string, text = REQUEST) =>
+  evidence(id, text, {
+    ownerId: OTHER_OWNER,
+    provenance: PROVENANCE.ownerStatement(id, OTHER_OWNER),
+    signals: { confidence: 1, salience: 1, negativeRetrieval: 0 },
+  });
+const ownRecord = () => evidence('own', 'Venue booking notes');
 
 describe('AVEN-008 owner isolation (hard invariant, enforced by the broker)', () => {
   it('never selects another owner’s exact match over the requesting owner’s weaker match (B)', async () => {
-    const foreignExact = evidence('foreign-exact', REQUEST, {
-      ownerId: OTHER_OWNER,
-      provenance: PROVENANCE.ownerStatement('foreign-exact', OTHER_OWNER),
-      signals: { confidence: 1, salience: 1, negativeRetrieval: 0 },
-    });
     const ownWeak = evidence('own-weak', 'Venue notes from last year', {
       signals: { confidence: 0.1, salience: 0.1, negativeRetrieval: 0 },
     });
     const result = await assemble(
       [
         memorySource('owner-store', 'owner_state', []),
-        memorySource('episodes', 'episode_history', [foreignExact, ownWeak]),
+        memorySource('episodes', 'episode_history', [
+          foreignRecord('foreign-exact'),
+          ownWeak,
+        ]),
       ],
       request(REQUEST),
     );
@@ -38,65 +49,43 @@ describe('AVEN-008 owner isolation (hard invariant, enforced by the broker)', ()
     expect(result.trace.ranking.map((r) => r.candidateId)).toEqual([
       'own-weak',
     ]);
-    const episodes = result.trace.sources.find(
-      (s) => s.sourceId === 'episodes',
-    )!;
-    expect(episodes).toMatchObject({
-      returned: 2,
-      foreignOwnerExcluded: 1,
-      considered: 1,
-    });
-    // No trace of the foreign record's ID or text, anywhere.
+    expect(result.trace.sources).toEqual([
+      { sourceId: 'episodes', kind: 'episode_history', considered: 1 },
+      { sourceId: 'owner-store', kind: 'owner_state', considered: 0 },
+    ]);
+    // No trace of the foreign record's ID, owner or text, anywhere.
     const json = JSON.stringify(result);
     expect(json).not.toContain('foreign-exact');
     expect(json).not.toContain(OTHER_OWNER);
-    // The foreign text equals the request text, which the output never holds.
     expect(json).not.toContain(REQUEST);
   });
 
-  it('excludes a same-owner candidate whose owner-origin provenance names another owner', async () => {
-    const laundered = ownerState('laundered', REQUEST, 'trusted', {
-      provenance: PROVENANCE.ownerStatement('laundered', OTHER_OWNER),
-    });
-    const correctionFromOther = evidence('correction-other', REQUEST, {
-      provenance: PROVENANCE.ownerCorrection('correction-other', OTHER_OWNER),
-    });
-    const own = evidence('own', 'Spring offsite venue shortlist');
-    const result = await assemble(
+  it('reveals nothing about foreign records: foreign-only equals empty (H3)', async () => {
+    const foreignOnly = await assemble(
       [
-        memorySource('store', 'owner_state', [laundered]),
-        memorySource('episodes', 'episode_history', [correctionFromOther, own]),
+        memorySource(
+          'episodes',
+          'episode_history',
+          Array.from({ length: 30 }, (_, i) => foreignRecord(`b${i}`)),
+        ),
       ],
       request(REQUEST),
     );
-    expect(selectedIds(result)).toEqual(['own']);
-    expect(result.trace.totals).toMatchObject({
-      returned: 3,
-      foreignOwnerExcluded: 0,
-      ownerProvenanceMismatchExcluded: 2,
-      considered: 1,
-    });
-    expect(JSON.stringify(result)).not.toContain('laundered');
-  });
-
-  it('serves nothing when a source returns only another owner’s records', async () => {
-    const result = await assemble(
-      [
-        memorySource('episodes', 'episode_history', [
-          evidence('b1', REQUEST, {
-            ownerId: OTHER_OWNER,
-            provenance: PROVENANCE.systemGenerated(),
-          }),
-        ]),
-      ],
+    const empty = await assemble(
+      [memorySource('episodes', 'episode_history', [])],
       request(REQUEST),
     );
-    expect(result.bundle.items).toEqual([]);
-    expect(result.trace.candidates).toEqual([]);
-    expect(result.trace.totals.foreignOwnerExcluded).toBe(1);
+    expect(foreignOnly.bundle.items).toEqual([]);
+    expect(JSON.stringify(foreignOnly)).toBe(JSON.stringify(empty));
+    for (const key of [
+      'returned',
+      'foreignOwnerExcluded',
+      'ownerProvenanceMismatchExcluded',
+    ])
+      expect(JSON.stringify(foreignOnly)).not.toContain(key);
   });
 
-  it('lets no foreign record change any ranking value, statistic or selection (C)', async () => {
+  it('lets no foreign record change any part of the output (C, H3)', async () => {
     const own = [
       evidence('a1', 'Venue booking deposit is due Friday'),
       evidence('a2', 'Checklist template for offsites', {
@@ -106,11 +95,7 @@ describe('AVEN-008 owner isolation (hard invariant, enforced by the broker)', ()
       evidence('a4', 'Unrelated: gardening reminder'),
     ];
     const foreign = Array.from({ length: 40 }, (_, i) =>
-      evidence(`b${i}`, i % 2 === 0 ? REQUEST : `${REQUEST} venue venue`, {
-        ownerId: OTHER_OWNER,
-        provenance: PROVENANCE.ownerStatement(`b${i}`, OTHER_OWNER),
-        signals: { confidence: 1, salience: 1, negativeRetrieval: 0 },
-      }),
+      foreignRecord(`b${i}`, i % 2 === 0 ? REQUEST : `${REQUEST} venue venue`),
     );
     const alone = await assemble(
       [memorySource('episodes', 'episode_history', own)],
@@ -126,21 +111,8 @@ describe('AVEN-008 owner isolation (hard invariant, enforced by the broker)', ()
       ],
       request(REQUEST),
     );
-    expect(JSON.stringify(mixed.bundle)).toBe(JSON.stringify(alone.bundle));
-    expect(JSON.stringify(mixed.trace.candidates)).toBe(
-      JSON.stringify(alone.trace.candidates),
-    );
-    expect(mixed.trace.ranking).toEqual(alone.trace.ranking);
-    expect(mixed.trace.query).toEqual(alone.trace.query);
-    expect(mixed.trace.budget).toEqual(alone.trace.budget);
-    // Only the isolation counters differ.
-    expect(mixed.trace.totals.foreignOwnerExcluded).toBe(40);
-    expect(alone.trace.totals.foreignOwnerExcluded).toBe(0);
-    expect({
-      ...mixed.trace.totals,
-      returned: 0,
-      foreignOwnerExcluded: 0,
-    }).toEqual({ ...alone.trace.totals, returned: 0, foreignOwnerExcluded: 0 });
+    // Byte-identical bundle AND trace: no isolation counter exists any more.
+    expect(JSON.stringify(mixed)).toBe(JSON.stringify(alone));
   });
 
   it('passes every source the requesting owner only, in a frozen query', async () => {
@@ -155,5 +127,114 @@ describe('AVEN-008 owner isolation (hard invariant, enforced by the broker)', ()
     expect(() => {
       (query as { ownerId: string }).ownerId = OTHER_OWNER;
     }).toThrow(TypeError);
+  });
+});
+
+describe('AVEN-008 foreign records are dropped before owner quotas and validation (H2)', () => {
+  it('serves the owner when a source returns 500 foreign records plus 1 own', async () => {
+    const result = await assemble(
+      [
+        memorySource('flood', 'episode_history', [
+          ...Array.from({ length: MAX_CANDIDATES_PER_SOURCE }, (_, i) =>
+            foreignRecord(`b${i}`),
+          ),
+          ownRecord(),
+        ]),
+      ],
+      request(REQUEST),
+    );
+    expect(selectedIds(result)).toEqual(['own']);
+    expect(result.trace.sources).toEqual([
+      { sourceId: 'flood', kind: 'episode_history', considered: 1 },
+    ]);
+  });
+
+  it('serves the owner when more than the total quota of foreign records arrives across sources', async () => {
+    const perSource = 600;
+    const sources = ['a', 'b', 'c', 'd'].map((id) =>
+      memorySource(
+        id,
+        'episode_history',
+        Array.from({ length: perSource }, (_, i) => foreignRecord(`${id}${i}`)),
+      ),
+    );
+    expect(sources.length * perSource).toBeGreaterThan(MAX_TOTAL_CANDIDATES);
+    const result = await assemble(
+      [...sources, memorySource('mine', 'episode_history', [ownRecord()])],
+      request(REQUEST),
+    );
+    expect(selectedIds(result)).toEqual(['own']);
+  });
+
+  it('ignores a foreign record that reuses the owner’s candidate ID', async () => {
+    const result = await assemble(
+      [
+        memorySource('episodes', 'episode_history', [
+          foreignRecord('own'),
+          ownRecord(),
+        ]),
+      ],
+      request(REQUEST),
+    );
+    expect(selectedIds(result)).toEqual(['own']);
+    expect(result.bundle.items[0]!.text).toBe('Venue booking notes');
+  });
+
+  it('never validates or reads a recognizable foreign record beyond its owner ID', async () => {
+    let textRead = false;
+    const malformedForeign = {
+      ownerId: OTHER_OWNER,
+      candidateId: 'not a valid id!',
+      signals: { confidence: Number.NaN },
+      get text(): string {
+        textRead = true;
+        throw new Error('SECRET-FOREIGN-TEXT');
+      },
+    };
+    const result = await assemble(
+      [
+        memorySource('episodes', 'episode_history', [
+          malformedForeign,
+          ownRecord(),
+        ]),
+      ],
+      request(REQUEST),
+    );
+    expect(selectedIds(result)).toEqual(['own']);
+    expect(textRead).toBe(false);
+  });
+
+  it('keeps the raw resource bound, separate from owner quotas and without counts', async () => {
+    const error = await assemble(
+      [
+        memorySource(
+          'pathological',
+          'episode_history',
+          Array.from({ length: MAX_RAW_ITEMS_PER_SOURCE + 1 }, () => ({
+            ownerId: OTHER_OWNER,
+          })),
+        ),
+      ],
+      request(REQUEST),
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ContextBrokerError);
+    expect(error).toMatchObject({
+      code: 'source_resource_limit_exceeded',
+      sourceId: 'pathological',
+    });
+    expect((error as Error).message).not.toMatch(/\d/);
+  });
+
+  it('fails closed on an item whose owner cannot be recognized', async () => {
+    for (const item of [
+      { ...ownRecord(), ownerId: 'owner B' },
+      { text: 'no owner at all' },
+    ])
+      await expect(
+        assemble(
+          [memorySource('episodes', 'episode_history', [item, ownRecord()])],
+          request(REQUEST),
+        ),
+      ).rejects.toMatchObject({ code: 'invalid_candidate', candidateIndex: 0 });
   });
 });

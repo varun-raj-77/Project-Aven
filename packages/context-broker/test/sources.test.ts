@@ -171,20 +171,22 @@ describe('AVEN-008 source failure policy: fail closed, typed, observable (Z)', (
       'invalid_configuration',
       'invalid_request',
       'source_failure',
+      'source_timeout',
+      'source_resource_limit_exceeded',
       'candidate_limit_exceeded',
       'invalid_candidate',
       'invalid_score_metadata',
+      'conflicting_duplicate',
     ]);
-    const cause = new Error('detail');
-    const error = new ContextBrokerError(
-      'invalid_candidate',
-      { sourceId: 's' },
-      cause,
-    );
+    const error = new ContextBrokerError('invalid_candidate', {
+      sourceId: 's',
+    });
     expect(error.message).toBe(
       'A context candidate is malformed; no context was assembled',
     );
-    expect(error.cause).toBe(cause);
+    // v2 keeps no cause at all.
+    expect(error.cause).toBeUndefined();
+    expect(Object.isFrozen(CONTEXT_BROKER_ERROR_CODES)).toBe(true);
     expect(error.name).toBe('ContextBrokerError');
   });
 });
@@ -213,7 +215,7 @@ describe('AVEN-008 collection bounds and flooding (Y)', () => {
       ],
       request('budget review'),
     );
-    expect(atCap.trace.totals.returned).toBe(500);
+    expect(atCap.trace.sources[0]!.considered).toBe(500);
     expect(atCap.bundle.items).toHaveLength(10);
     const error = await failure([
       memorySource(
@@ -242,22 +244,21 @@ describe('AVEN-008 collection bounds and flooding (Y)', () => {
     expect(error.sourceId).toBeUndefined();
   });
 
-  it('counts a flooding source’s foreign records against its cap and never selects them', async () => {
+  it('never counts foreign records against the owner-context quota (H2)', async () => {
     const result = await assemble(
       [
         memorySource('noisy', 'episode_history', [
-          ...many('b', MAX_CANDIDATES_PER_SOURCE - 1, OTHER_OWNER),
-          evidence('own', 'Budget review notes'),
+          ...many('b', MAX_CANDIDATES_PER_SOURCE, OTHER_OWNER),
+          ...many('own', MAX_CANDIDATES_PER_SOURCE),
         ]),
       ],
       request('budget review'),
     );
-    expect(selectedIds(result)).toEqual(['own']);
-    expect(result.trace.totals.foreignOwnerExcluded).toBe(499);
+    expect(result.trace.sources[0]!.considered).toBe(MAX_CANDIDATES_PER_SOURCE);
     const overflow = await failure([
       memorySource('noisy', 'episode_history', [
-        ...many('b', MAX_CANDIDATES_PER_SOURCE, OTHER_OWNER),
-        evidence('own', 'Budget review notes'),
+        ...many('b', 10, OTHER_OWNER),
+        ...many('own', MAX_CANDIDATES_PER_SOURCE + 1),
       ]),
     ]);
     expect(overflow.code).toBe('candidate_limit_exceeded');
@@ -274,7 +275,7 @@ describe('AVEN-008 collection bounds and flooding (Y)', () => {
       request('budget review'),
     );
     expect(result.bundle.items).toHaveLength(10);
-    expect(result.bundle.budget.stopReason).toBe('item_limit');
+    expect(result.bundle.budget.itemLimitExclusions).toBeGreaterThan(0);
   });
 });
 

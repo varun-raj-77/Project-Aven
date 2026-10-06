@@ -1,9 +1,10 @@
-import { z } from 'zod';
 import {
   CONTEXT_BROKER_CONFIG_VERSION,
   CONTEXT_BROKER_VERSION,
   EXTERNAL_SOURCE_PROVENANCE_KINDS,
   MAX_CANDIDATES_PER_SOURCE,
+  MAX_RAW_ITEMS_PER_SOURCE,
+  MAX_RAW_ITEMS_TOTAL,
   MAX_SELECTED_CONTEXT_CHARS,
   MAX_SELECTED_ITEMS,
   MAX_SINGLE_CONTEXT_ITEM_CHARS,
@@ -11,10 +12,18 @@ import {
   MAX_TOTAL_CANDIDATES,
   NEGATIVE_SIGNAL_SUPPRESSION_VALUE,
   RELEVANCE_VERSION,
+  SCOPE_VERSION,
+  SOURCE_COLLECTION_DEADLINE_MS,
   SOURCE_KIND_REFERENCE_KINDS,
+  TRACE_VERSION,
   type ContextSourceKind,
 } from './config.ts';
-import { ContextBrokerError } from './errors.ts';
+import { DEADLINE_EXPIRED, startCollectionDeadline } from './deadline.ts';
+import {
+  ContextBrokerError,
+  type ContextBrokerErrorCode,
+  type ContextBrokerErrorLocation,
+} from './errors.ts';
 import {
   extractQueryTerms,
   lexicalRelevance,
@@ -38,16 +47,14 @@ import {
   type ScopeAssessment,
 } from './scope.ts';
 import {
-  ContextCandidateSchema,
-  ContextRequestSchema,
-  ContextSourceKindSchema,
-  LocalIdSchema,
+  INTERNAL,
   type ContextRequest,
   type ParsedContextCandidate,
   type ParsedContextRequest,
   type TaskDescriptor,
 } from './types.ts';
 import {
+  canonicalJson,
   codePointLength,
   compareCodeUnits,
   deepFreeze,
@@ -55,12 +62,14 @@ import {
 } from './util.ts';
 
 /**
- * Context Broker v1 (AVEN-008): TASK-SPECIFIC CONTEXT ASSEMBLY.
+ * Context Broker v2 (AVEN-008): TASK-SPECIFIC CONTEXT ASSEMBLY.
  *
- *   request + transient candidates from injected sources
- *     -> owner isolation -> eligibility/scope -> transparent ranking
- *     -> negative-signal handling -> budgeted deterministic selection
- *     -> ContextBundle + observable trace
+ *   request + transient candidates from injected sources (bounded by a
+ *   collection deadline)
+ *     -> raw resource bound -> recognizable foreign records dropped
+ *     -> owner-context quotas -> validation -> identity deduplication
+ *     -> eligibility/scope -> transparent ranking -> negative signals
+ *     -> budgeted deterministic selection -> ContextBundle + trace
  *
  * Context is not memory. The broker is read/compute-only: it owns no storage,
  * appends nothing to the Ledger, persists no score, signal or selection,
@@ -68,6 +77,10 @@ import {
  * calls no model or network, and makes no permission decision. Candidate text
  * is data; it never changes ownership, provenance, trust or scope. The bundle
  * is structured context, not a prompt; later fast-loop code serializes it.
+ *
+ * Every read of caller- or source-supplied data (properties, getters, array
+ * elements, proxies) happens inside `guard`, which turns ANY thrown value into
+ * a fixed, typed `ContextBrokerError` without keeping the thrown value.
  */
 
 /** The owner-scoped, deep-frozen query every source receives. */
@@ -77,8 +90,13 @@ export interface ContextSourceQuery {
   readonly request: string;
   readonly referenceTime: string;
   readonly taskDescriptor: Readonly<TaskDescriptor>;
-  /** Collections larger than this fail the whole assembly. */
+  /** Owner-context quota: more of the owner's candidates fail the assembly. */
   readonly maxCandidates: number;
+}
+
+/** Aborted when the collection deadline expires; sources may honour it. */
+export interface ContextSourceCollectOptions {
+  readonly signal: AbortSignal;
 }
 
 /**
@@ -95,6 +113,7 @@ export interface ContextSource {
   readonly kind: ContextSourceKind;
   collect(
     query: ContextSourceQuery,
+    options: ContextSourceCollectOptions,
   ): readonly unknown[] | Promise<readonly unknown[]>;
 }
 
@@ -103,11 +122,13 @@ export interface ContextBrokerOptions {
 }
 
 export type ExclusionReason =
+  | 'duplicate_identity'
   | 'superseded'
   | 'revoked'
   | 'recorded_after_reference_time'
   | 'task_binding_mismatch'
   | 'scope_mismatch'
+  | 'scope_unresolved'
   | 'negative_signal_suppressed'
   | 'no_relevance_channel'
   | 'item_limit'
@@ -115,11 +136,13 @@ export type ExclusionReason =
 
 /** Eligibility reasons in precedence order, then the two budget reasons. */
 export const EXCLUSION_REASONS: readonly ExclusionReason[] = Object.freeze([
+  'duplicate_identity',
   'superseded',
   'revoked',
   'recorded_after_reference_time',
   'task_binding_mismatch',
   'scope_mismatch',
+  'scope_unresolved',
   'negative_signal_suppressed',
   'no_relevance_channel',
   'item_limit',
@@ -136,8 +159,10 @@ export interface BudgetUsage {
   readonly selectedItems: number;
   readonly usedChars: number;
   readonly truncatedItems: number;
-  /** Why selection stopped before the eligible list ended, if it did. */
-  readonly stopReason: 'item_limit' | 'context_budget' | null;
+  /** Eligible items skipped because they did not fit the remaining chars. */
+  readonly contextBudgetExclusions: number;
+  /** Eligible items left after the item limit was reached. */
+  readonly itemLimitExclusions: number;
 }
 
 export interface ContextBundleItem {
@@ -158,12 +183,16 @@ export interface ContextBundleItem {
   readonly score: ScoreBreakdown;
 }
 
-/** Transient context for ONE task. Not owner memory and not authority. */
-export interface ContextBundle {
-  readonly kind: 'context_bundle';
+interface Versions {
   readonly brokerVersion: string;
   readonly configVersion: string;
   readonly relevanceVersion: string;
+  readonly scopeVersion: string;
+}
+
+/** Transient context for ONE task. Not owner memory and not authority. */
+export interface ContextBundle extends Versions {
+  readonly kind: 'context_bundle';
   readonly ownerId: string;
   readonly task: { readonly sessionId: string; readonly taskId: string };
   readonly referenceTime: string;
@@ -186,11 +215,21 @@ export interface TraceCandidate {
   };
   readonly selection: 'selected' | 'excluded';
   readonly exclusionReason: ExclusionReason | null;
+  /** The kept candidate this one duplicates (same owner), if any. */
+  readonly duplicateOf: {
+    readonly sourceId: string;
+    readonly candidateId: string;
+  } | null;
   /** 1-based position among eligible candidates; null if ineligible. */
   readonly eligibleRank: number | null;
   readonly taskBinding: 'matches' | 'does_not_match' | 'not_task_bound';
   readonly scope: ScopeAssessment;
-  readonly relevance: LexicalRelevance;
+  /** Counts only: matched terms are request-derived and never echoed. */
+  readonly relevance: {
+    readonly score: number;
+    readonly matchedTermCount: number;
+    readonly matchedContentTermCount: number;
+  };
   readonly channels: readonly RelevanceChannel[];
   readonly freshness: FreshnessAssessment | null;
   readonly trustBasis: TrustBasis;
@@ -206,34 +245,31 @@ export interface TraceCandidate {
 export interface TraceSource {
   readonly sourceId: string;
   readonly kind: ContextSourceKind;
-  readonly returned: number;
-  /** Candidates of another owner: excluded before any statistic; no IDs kept. */
-  readonly foreignOwnerExcluded: number;
-  /** Owner-origin provenance naming another owner: excluded; no IDs kept. */
-  readonly ownerProvenanceMismatchExcluded: number;
+  /** The requesting owner's validated candidates from this source. */
   readonly considered: number;
 }
 
 /**
- * Observable, non-chain-of-thought trace of the deterministic computation:
- * identifiers, codes and numbers only. It holds no item text, no hidden
- * reasoning, no secret and no authority decision.
+ * Observable, non-chain-of-thought trace (`aven-008-trace-v2`): owner-local
+ * identifiers, reason codes, counts and numbers. It holds no item text, no
+ * request-derived terms, nothing about other owners' records (no IDs, counts
+ * or totals), no hidden reasoning and no authority decision. It is
+ * metadata-oriented, NOT a safe place for secrets: caller-chosen IDs appear
+ * verbatim.
  */
-export interface ContextBrokerTrace {
+export interface ContextBrokerTrace extends Versions {
   readonly kind: 'context_broker_trace';
-  readonly brokerVersion: string;
-  readonly configVersion: string;
-  readonly relevanceVersion: string;
+  readonly traceVersion: string;
   readonly ownerId: string;
   readonly task: { readonly sessionId: string; readonly taskId: string };
   readonly referenceTime: string;
   readonly query: {
-    readonly terms: readonly string[];
+    readonly termCount: number;
     readonly contentTermCount: number;
     readonly qualifierTermCount: number;
   };
   readonly sources: readonly TraceSource[];
-  /** Every same-owner candidate, ordered by sourceId then candidateId. */
+  /** Every validated same-owner candidate, ordered by sourceId then candidateId. */
   readonly candidates: readonly TraceCandidate[];
   /** Eligible candidates in rank order with their final scores. */
   readonly ranking: readonly {
@@ -247,9 +283,6 @@ export interface ContextBrokerTrace {
     readonly candidateId: string;
   }[];
   readonly totals: {
-    readonly returned: number;
-    readonly foreignOwnerExcluded: number;
-    readonly ownerProvenanceMismatchExcluded: number;
     readonly considered: number;
     readonly eligible: number;
     readonly selected: number;
@@ -275,35 +308,65 @@ export interface ContextBroker {
 interface RegisteredSource {
   readonly sourceId: string;
   readonly kind: ContextSourceKind;
-  readonly target: ContextSource;
-  readonly collect: ContextSource['collect'];
+  readonly target: object;
+  readonly collect: (...args: unknown[]) => unknown;
 }
 
-const OptionsSchema = z.strictObject({
-  sources: z.array(z.unknown()).max(MAX_SOURCES),
-});
+/**
+ * Runs `read` (which touches untrusted data) and converts ANY thrown value,
+ * including a spoofed `ContextBrokerError`, into a fresh fixed broker error.
+ * The thrown value is discarded, never kept as `cause`.
+ */
+function guard<T>(
+  read: () => T,
+  code: ContextBrokerErrorCode,
+  location: ContextBrokerErrorLocation = {},
+): T {
+  try {
+    return read();
+  } catch {
+    throw new ContextBrokerError(code, location);
+  }
+}
+
+const REJECT = Symbol('reject');
 
 function register(options: unknown): RegisteredSource[] {
-  const parsed = OptionsSchema.safeParse(options);
-  if (!parsed.success)
-    throw new ContextBrokerError('invalid_configuration', {}, parsed.error);
-  const registered = parsed.data.sources.map((raw) => {
-    const source = raw as Partial<ContextSource> | null;
-    // Read once at registration: a source cannot later change its ID or kind.
-    const sourceId = source?.sourceId;
-    const kind = source?.kind;
-    const collect = source?.collect;
+  const entries = guard(() => {
+    if (options === null || typeof options !== 'object') throw REJECT;
+    const keys = Reflect.ownKeys(options);
+    if (keys.length !== 1 || keys[0] !== 'sources') throw REJECT;
+    const sources: unknown = Reflect.get(options, 'sources');
+    if (!Array.isArray(sources)) throw REJECT;
+    const length: unknown = sources.length;
+    if (typeof length !== 'number' || length > MAX_SOURCES) throw REJECT;
+    const read = [];
+    for (let i = 0; i < length; i += 1) {
+      const source: unknown = sources[i];
+      if (source === null || typeof source !== 'object') throw REJECT;
+      // Read once at registration: a source cannot later change its identity.
+      read.push({
+        target: source,
+        sourceId: Reflect.get(source, 'sourceId') as unknown,
+        kind: Reflect.get(source, 'kind') as unknown,
+        collect: Reflect.get(source, 'collect') as unknown,
+      });
+    }
+    return read;
+  }, 'invalid_configuration');
+  const registered = entries.map((entry) => {
     if (
-      !LocalIdSchema.safeParse(sourceId).success ||
-      !ContextSourceKindSchema.safeParse(kind).success ||
-      typeof collect !== 'function'
+      typeof entry.sourceId !== 'string' ||
+      !INTERNAL.localId.safeParse(entry.sourceId).success ||
+      !INTERNAL.sourceKind.safeParse(entry.kind).success ||
+      typeof entry.collect !== 'function'
     )
       throw new ContextBrokerError('invalid_configuration');
     return Object.freeze({
-      sourceId: sourceId as string,
-      kind: kind as ContextSourceKind,
-      target: source as ContextSource,
-      collect,
+      sourceId: entry.sourceId,
+      kind: entry.kind as ContextSourceKind,
+      target: entry.target,
+      collect: entry.collect as (...args: unknown[]) => unknown,
     });
   });
   registered.sort((a, b) => compareCodeUnits(a.sourceId, b.sourceId));
@@ -312,41 +375,8 @@ function register(options: unknown): RegisteredSource[] {
   return registered;
 }
 
-function parseCandidate(
-  raw: unknown,
-  source: RegisteredSource,
-  index: number,
-): ParsedContextCandidate {
-  const parsed = ContextCandidateSchema.safeParse(raw);
-  const location = { sourceId: source.sourceId, candidateIndex: index };
-  if (!parsed.success) {
-    const signalIssue = parsed.error.issues.some(
-      (i) => i.path[0] === 'signals',
-    );
-    throw new ContextBrokerError(
-      signalIssue ? 'invalid_score_metadata' : 'invalid_candidate',
-      location,
-      parsed.error,
-    );
-  }
-  const candidate = parsed.data;
-  // Structural consistency with the registered source kind. An external
-  // adapter can never present its content as owner-origin, owner state or a
-  // current instruction.
-  if (
-    !SOURCE_KIND_REFERENCE_KINDS[source.kind].includes(
-      candidate.reference.kind,
-    ) ||
-    (source.kind === 'permitted_external' &&
-      !EXTERNAL_SOURCE_PROVENANCE_KINDS.includes(candidate.provenance.kind))
-  )
-    throw new ContextBrokerError('invalid_candidate', location);
-  return candidate;
-}
-
 interface Collected {
   readonly source: RegisteredSource;
-  readonly returned: number;
   readonly candidates: readonly ParsedContextCandidate[];
 }
 
@@ -354,57 +384,212 @@ async function collectAll(
   sources: readonly RegisteredSource[],
   query: ContextSourceQuery,
 ): Promise<Collected[]> {
-  const settled = await Promise.allSettled(
-    sources.map((s) =>
-      Promise.resolve().then(() => s.collect.call(s.target, query)),
-    ),
-  );
-  // Collection-level checks first, in sourceId order: a failed or oversized
-  // source fails the whole assembly (no partial bundle that looks complete).
-  const snapshots: unknown[][] = [];
-  let total = 0;
-  settled.forEach((result, i) => {
-    const source = sources[i]!;
+  const deadline = startCollectionDeadline(SOURCE_COLLECTION_DEADLINE_MS);
+  const options: ContextSourceCollectOptions = Object.freeze({
+    signal: deadline.signal,
+  });
+  let settled: PromiseSettledResult<unknown>[];
+  try {
+    settled = await Promise.allSettled(
+      sources.map((s) =>
+        deadline.race(
+          Promise.resolve().then(() =>
+            s.collect.call(s.target, query, options),
+          ),
+        ),
+      ),
+    );
+  } finally {
+    deadline.dispose();
+  }
+
+  // 1. Source outcomes, in sourceId order (never settlement order). A failed,
+  //    timed-out or malformed source fails the whole assembly: no partial
+  //    bundle that looks complete.
+  const collections = settled.map((result, i) => {
+    const sourceId = sources[i]!.sourceId;
     if (result.status === 'rejected')
       throw new ContextBrokerError(
-        'source_failure',
-        { sourceId: source.sourceId },
-        result.reason,
+        result.reason === DEADLINE_EXPIRED
+          ? 'source_timeout'
+          : 'source_failure',
+        { sourceId },
       );
     const value: unknown = result.value;
-    if (!Array.isArray(value))
-      throw new ContextBrokerError('source_failure', {
-        sourceId: source.sourceId,
+    const length = guard(
+      () => {
+        if (!Array.isArray(value)) throw REJECT;
+        const n: unknown = value.length;
+        if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0)
+          throw REJECT;
+        return n;
+      },
+      'source_failure',
+      { sourceId },
+    );
+    return { value: value as readonly unknown[], length };
+  });
+
+  // 2. RAW resource bound (not an owner quota): checked on length alone,
+  //    before any element is read, whoever the items belong to.
+  let raw = 0;
+  collections.forEach(({ length }, i) => {
+    if (length > MAX_RAW_ITEMS_PER_SOURCE)
+      throw new ContextBrokerError('source_resource_limit_exceeded', {
+        sourceId: sources[i]!.sourceId,
       });
-    if (value.length > MAX_CANDIDATES_PER_SOURCE)
+    raw += length;
+  });
+  if (raw > MAX_RAW_ITEMS_TOTAL)
+    throw new ContextBrokerError('source_resource_limit_exceeded');
+
+  // 3. Drop RECOGNIZABLE foreign records first: an object whose `ownerId` is
+  //    a well-formed owner ID other than the requester's. Nothing else of
+  //    theirs is read, validated, counted, deduplicated or traced.
+  const owned = collections.map(({ value, length }, i) => {
+    const sourceId = sources[i]!.sourceId;
+    const items: { index: number; item: unknown }[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const location = { sourceId, candidateIndex: index };
+      const item = guard(
+        () => value[index] as unknown,
+        'invalid_candidate',
+        location,
+      );
+      const owner = guard(
+        () =>
+          item !== null && typeof item === 'object'
+            ? (Reflect.get(item, 'ownerId') as unknown)
+            : undefined,
+        'invalid_candidate',
+        location,
+      );
+      const foreign =
+        typeof owner === 'string' &&
+        owner !== query.ownerId &&
+        INTERNAL.ownerId.safeParse(owner).success;
+      if (!foreign) items.push({ index, item });
+    }
+    return items;
+  });
+
+  // 4. OWNER-CONTEXT quotas, over the remaining (non-foreign) items only.
+  let total = 0;
+  owned.forEach((items, i) => {
+    if (items.length > MAX_CANDIDATES_PER_SOURCE)
       throw new ContextBrokerError('candidate_limit_exceeded', {
-        sourceId: source.sourceId,
+        sourceId: sources[i]!.sourceId,
       });
-    total += value.length;
-    snapshots.push(Array.prototype.slice.call(value) as unknown[]);
+    total += items.length;
   });
   if (total > MAX_TOTAL_CANDIDATES)
     throw new ContextBrokerError('candidate_limit_exceeded');
+
+  // 5. Validation of a plain-data snapshot (getters run once, inside guard).
   return sources.map((source, i) => {
-    const raw = snapshots[i]!;
     const seen = new Set<string>();
-    const candidates = raw.map((item, index) => {
-      const candidate = parseCandidate(item, source, index);
-      if (seen.has(candidate.candidateId))
-        throw new ContextBrokerError('invalid_candidate', {
-          sourceId: source.sourceId,
-          candidateIndex: index,
-        });
+    const candidates = owned[i]!.map(({ index, item }) => {
+      const location = { sourceId: source.sourceId, candidateIndex: index };
+      const snapshot = guard(
+        () => structuredClone(item),
+        'invalid_candidate',
+        location,
+      );
+      const parsed = INTERNAL.candidate.safeParse(snapshot);
+      if (!parsed.success)
+        throw new ContextBrokerError(
+          parsed.error.issues.every((issue) => issue.path[0] === 'signals')
+            ? 'invalid_score_metadata'
+            : 'invalid_candidate',
+          location,
+        );
+      const candidate = parsed.data;
+      // Owner read inconsistently (e.g. a getter that changed its answer),
+      // reference kind not declared for this source kind, external content
+      // presented as anything else, or a repeated ID within one source.
+      if (
+        candidate.ownerId !== query.ownerId ||
+        !SOURCE_KIND_REFERENCE_KINDS[source.kind].includes(
+          candidate.reference.kind,
+        ) ||
+        (source.kind === 'permitted_external' &&
+          !EXTERNAL_SOURCE_PROVENANCE_KINDS.includes(
+            candidate.provenance.kind,
+          )) ||
+        seen.has(candidate.candidateId)
+      )
+        throw new ContextBrokerError('invalid_candidate', location);
       seen.add(candidate.candidateId);
       return candidate;
     });
-    return { source, returned: raw.length, candidates };
+    candidates.sort((a, b) => compareCodeUnits(a.candidateId, b.candidateId));
+    return { source, candidates };
   });
+}
+
+/** Structured identities of a candidate (no text-based deduplication). */
+function identityKeys(candidate: ParsedContextCandidate): string[] {
+  const reference = candidate.reference;
+  const referenceKey =
+    reference.kind === 'evidence'
+      ? `evidence\u0000${reference.reference.evidenceId}`
+      : reference.kind === 'current_instruction'
+        ? `evidence\u0000${reference.evidence.evidenceId}`
+        : `learned\u0000${reference.reference.learnedItemId}\u0000${reference.reference.version}`;
+  return [`candidate\u0000${candidate.candidateId}`, referenceKey];
+}
+
+interface Entry {
+  readonly source: RegisteredSource;
+  readonly candidate: ParsedContextCandidate;
+}
+
+/**
+ * Identity deduplication (M1). Candidates sharing a candidate ID, an evidence
+ * ID (evidence or current-instruction reference) or a learned item ID plus
+ * version form one group (transitively). A group whose members are not
+ * identical apart from `candidateId` fails closed (`conflicting_duplicate`):
+ * the broker never picks between disagreeing trust, scope or content. A
+ * consistent group keeps its first member by sourceId, then candidateId.
+ */
+function deduplicate(entries: readonly Entry[]): Map<Entry, Entry> {
+  const parent = entries.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i]!;
+    return i;
+  };
+  const owner = new Map<string, number>();
+  entries.forEach((entry, i) => {
+    for (const key of identityKeys(entry.candidate)) {
+      const j = owner.get(key);
+      if (j === undefined) owner.set(key, i);
+      else {
+        const a = find(i);
+        const b = find(j);
+        if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+      }
+    }
+  });
+  const duplicateOf = new Map<Entry, Entry>();
+  const signature = (e: Entry) =>
+    canonicalJson({ ...e.candidate, candidateId: null });
+  entries.forEach((entry, i) => {
+    const root = find(i);
+    if (root === i) return;
+    const kept = entries[root]!;
+    if (signature(entry) !== signature(kept))
+      throw new ContextBrokerError('conflicting_duplicate', {
+        sourceId: entry.source.sourceId,
+      });
+    duplicateOf.set(entry, kept);
+  });
+  return duplicateOf;
 }
 
 interface Assessed {
   readonly source: RegisteredSource;
   readonly candidate: ParsedContextCandidate;
+  readonly duplicateOf: Entry | undefined;
   readonly includedText: string;
   readonly originalChars: number;
   readonly includedChars: number;
@@ -420,11 +605,12 @@ interface Assessed {
 }
 
 function assess(
-  source: RegisteredSource,
-  candidate: ParsedContextCandidate,
+  entry: Entry,
+  duplicateOf: Entry | undefined,
   request: ParsedContextRequest,
   query: ReturnType<typeof extractQueryTerms>,
 ): Assessed {
+  const { source, candidate } = entry;
   const originalChars = codePointLength(candidate.text);
   const truncated = originalChars > MAX_SINGLE_CONTEXT_ITEM_CHARS;
   const includedText = truncated
@@ -435,10 +621,8 @@ function assess(
   const relevance = lexicalRelevance(query, includedText);
   const bindingMatch = taskBindingMatches(candidate, request);
   const declared = assessScope(candidate, request);
-  const scope =
-    bindingMatch === true && declared.status !== 'mismatch'
-      ? withTaskBinding(declared)
-      : declared;
+  // A matching binding never clears an unresolved or mismatched restriction.
+  const scope = bindingMatch === true ? withTaskBinding(declared) : declared;
   const reference = Date.parse(request.referenceTime);
   const afterReference =
     Date.parse(candidate.timestamps.recordedAt) > reference ||
@@ -451,8 +635,7 @@ function assess(
   if (relevance.matchedContentTermCount > 0)
     channels.push('lexical_content_term');
   if (scope.status === 'task_match') channels.push('task');
-  if (scope.status === 'label_match' || scope.status === 'partial_label_match')
-    channels.push('scope_label');
+  if (scope.status === 'label_match') channels.push('scope_label');
   const lifecycle =
     candidate.reference.kind === 'owner_state'
       ? candidate.reference.lifecycle
@@ -460,24 +643,31 @@ function assess(
   const negative = candidate.signals.negativeRetrieval;
   // Eligibility in fixed precedence; the first failing rule is reported.
   const ineligibility: ExclusionReason | null =
-    lifecycle === 'superseded'
-      ? 'superseded'
-      : lifecycle === 'revoked'
-        ? 'revoked'
-        : afterReference
-          ? 'recorded_after_reference_time'
-          : bindingMatch === false
-            ? 'task_binding_mismatch'
-            : scope.status === 'mismatch'
-              ? 'scope_mismatch'
-              : negative >= NEGATIVE_SIGNAL_SUPPRESSION_VALUE
-                ? 'negative_signal_suppressed'
-                : channels.length === 0
-                  ? 'no_relevance_channel'
-                  : null;
+    duplicateOf !== undefined
+      ? 'duplicate_identity'
+      : lifecycle === 'superseded'
+        ? 'superseded'
+        : lifecycle === 'revoked'
+          ? 'revoked'
+          : afterReference
+            ? 'recorded_after_reference_time'
+            : bindingMatch === false
+              ? 'task_binding_mismatch'
+              : scope.status === 'mismatch'
+                ? 'scope_mismatch'
+                : scope.status === 'unresolved'
+                  ? 'scope_unresolved'
+                  : negative >= NEGATIVE_SIGNAL_SUPPRESSION_VALUE
+                    ? 'negative_signal_suppressed'
+                    : channels.length === 0
+                      ? 'no_relevance_channel'
+                      : null;
   const basis = trustBasis(candidate);
   const breakdown =
-    ineligibility === null && fresh !== null && scope.status !== 'mismatch'
+    ineligibility === null &&
+    fresh !== null &&
+    scope.status !== 'mismatch' &&
+    scope.status !== 'unresolved'
       ? score(
           {
             relevance: relevance.score,
@@ -494,6 +684,7 @@ function assess(
   return {
     source,
     candidate,
+    duplicateOf,
     includedText,
     originalChars,
     includedChars,
@@ -527,10 +718,11 @@ export function createContextBroker(
   );
 
   async function assemble(input: ContextRequest): Promise<ContextAssembly> {
-    const parsedRequest = ContextRequestSchema.safeParse(input);
-    if (!parsedRequest.success)
-      throw new ContextBrokerError('invalid_request', {}, parsedRequest.error);
-    const request = parsedRequest.data;
+    const request = guard(() => {
+      const parsed = INTERNAL.request.safeParse(structuredClone(input));
+      if (!parsed.success) throw REJECT;
+      return parsed.data;
+    }, 'invalid_request');
     const task = {
       sessionId: request.task.sessionId,
       taskId: request.task.taskId,
@@ -547,58 +739,37 @@ export function createContextBroker(
     const collected = await collectAll(sources, sourceQuery);
     const query = extractQueryTerms(request.request);
 
-    // Owner isolation BEFORE any statistic: foreign candidates and candidates
-    // whose owner-origin provenance names another owner are dropped and only
-    // counted, so they can affect neither membership nor any score.
-    const traceSources: TraceSource[] = [];
-    const assessed: Assessed[] = [];
-    for (const { source, returned, candidates } of collected) {
-      let foreignOwnerExcluded = 0;
-      let ownerProvenanceMismatchExcluded = 0;
-      const own: ParsedContextCandidate[] = [];
-      for (const candidate of candidates) {
-        if (candidate.ownerId !== request.ownerId) foreignOwnerExcluded += 1;
-        else if (
-          'ownerId' in candidate.provenance &&
-          candidate.provenance.ownerId !== request.ownerId
-        )
-          ownerProvenanceMismatchExcluded += 1;
-        else own.push(candidate);
-      }
-      own.sort((a, b) => compareCodeUnits(a.candidateId, b.candidateId));
-      for (const candidate of own)
-        assessed.push(assess(source, candidate, request, query));
-      traceSources.push({
-        sourceId: source.sourceId,
-        kind: source.kind,
-        returned,
-        foreignOwnerExcluded,
-        ownerProvenanceMismatchExcluded,
-        considered: own.length,
-      });
-    }
+    const entries: Entry[] = collected.flatMap(({ source, candidates }) =>
+      candidates.map((candidate) => ({ source, candidate })),
+    );
+    const duplicates = deduplicate(entries);
+    const assessed = entries.map((entry) =>
+      assess(entry, duplicates.get(entry), request, query),
+    );
 
     const eligible = assessed
       .filter((a) => a.ineligibility === null)
       .sort(byRank);
     const eligibleRank = new Map(eligible.map((a, i) => [a, i + 1]));
 
-    // Budget: a rank-order prefix. At the first eligible item that does not
-    // fit, it and every lower-ranked eligible item are excluded with the
-    // reason that stopped selection. Items are never reordered or split
-    // beyond the per-item code-point prefix.
+    // Budget (v2): walk the ranking once. An item that does not fit the
+    // remaining characters is skipped (`context_budget`) and the walk
+    // continues; once the item limit is reached, every remaining item is
+    // `item_limit`. Survivors keep rank order and are never split beyond the
+    // per-item code-point prefix.
     const budgetExclusion = new Map<Assessed, ExclusionReason>();
     const selected: Assessed[] = [];
     let usedChars = 0;
-    let stopReason: 'item_limit' | 'context_budget' | null = null;
+    let contextBudgetExclusions = 0;
+    let itemLimitExclusions = 0;
     for (const item of eligible) {
-      if (stopReason === null) {
-        if (selected.length >= MAX_SELECTED_ITEMS) stopReason = 'item_limit';
-        else if (usedChars + item.includedChars > MAX_SELECTED_CONTEXT_CHARS)
-          stopReason = 'context_budget';
-      }
-      if (stopReason !== null) budgetExclusion.set(item, stopReason);
-      else {
+      if (selected.length >= MAX_SELECTED_ITEMS) {
+        budgetExclusion.set(item, 'item_limit');
+        itemLimitExclusions += 1;
+      } else if (usedChars + item.includedChars > MAX_SELECTED_CONTEXT_CHARS) {
+        budgetExclusion.set(item, 'context_budget');
+        contextBudgetExclusions += 1;
+      } else {
         selected.push(item);
         usedChars += item.includedChars;
       }
@@ -612,12 +783,14 @@ export function createContextBroker(
       selectedItems: selected.length,
       usedChars,
       truncatedItems: selected.filter((s) => s.truncated).length,
-      stopReason,
+      contextBudgetExclusions,
+      itemLimitExclusions,
     };
-    const versions = {
+    const versions: Versions = {
       brokerVersion: CONTEXT_BROKER_VERSION,
       configVersion: CONTEXT_BROKER_CONFIG_VERSION,
       relevanceVersion: RELEVANCE_VERSION,
+      scopeVersion: SCOPE_VERSION,
     };
     const identity = {
       ownerId: request.ownerId,
@@ -667,6 +840,13 @@ export function createContextBroker(
         signals: { ...a.candidate.signals },
         selection: exclusionReason === null ? 'selected' : 'excluded',
         exclusionReason,
+        duplicateOf:
+          a.duplicateOf === undefined
+            ? null
+            : {
+                sourceId: a.duplicateOf.source.sourceId,
+                candidateId: a.duplicateOf.candidate.candidateId,
+              },
         eligibleRank: eligibleRank.get(a) ?? null,
         taskBinding:
           a.bindingMatch === undefined
@@ -675,7 +855,11 @@ export function createContextBroker(
               ? 'matches'
               : 'does_not_match',
         scope: a.scope,
-        relevance: a.relevance,
+        relevance: {
+          score: a.relevance.score,
+          matchedTermCount: a.relevance.matchedTerms.length,
+          matchedContentTermCount: a.relevance.matchedContentTermCount,
+        },
         channels: a.channels,
         freshness: a.freshness,
         trustBasis: a.trustBasis,
@@ -690,15 +874,20 @@ export function createContextBroker(
 
     const trace: ContextBrokerTrace = {
       kind: 'context_broker_trace',
+      traceVersion: TRACE_VERSION,
       ...versions,
       ...identity,
       task: { ...task },
       query: {
-        terms: query.terms,
+        termCount: query.terms.length,
         contentTermCount: query.contentTermCount,
         qualifierTermCount: query.qualifierTermCount,
       },
-      sources: traceSources,
+      sources: collected.map(({ source, candidates }) => ({
+        sourceId: source.sourceId,
+        kind: source.kind,
+        considered: candidates.length,
+      })),
       candidates: traceCandidates,
       ranking: eligible.map((a) => ({
         sourceId: a.source.sourceId,
@@ -711,15 +900,6 @@ export function createContextBroker(
         candidateId: item.candidateId,
       })),
       totals: {
-        returned: traceSources.reduce((n, s) => n + s.returned, 0),
-        foreignOwnerExcluded: traceSources.reduce(
-          (n, s) => n + s.foreignOwnerExcluded,
-          0,
-        ),
-        ownerProvenanceMismatchExcluded: traceSources.reduce(
-          (n, s) => n + s.ownerProvenanceMismatchExcluded,
-          0,
-        ),
         considered: assessed.length,
         eligible: eligible.length,
         selected: selected.length,

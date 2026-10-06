@@ -1,9 +1,16 @@
-# AVEN-008 report: Context Broker v1
+# AVEN-008 report: Context Broker
 
-Status: **implemented on an isolated candidate branch; not merged; not tagged;
-awaiting external review.** Validation ran in a Linux cloud container (section
-22). Windows validation is pending. No model was called. Nothing in this report
-is an experimental result, and no C-versus-B claim is made.
+Status: **implemented on an isolated candidate branch; independent review
+corrections applied (configuration v2, section 28); not merged; not tagged;
+awaiting final external verification.** Validation ran in a Linux cloud
+container (sections 22 and 28.15). Windows validation is pending. No model was
+called. Nothing in this report is an experimental result, and no C-versus-B
+claim is made.
+
+Sections 1 to 27 are the unchanged record of the reviewed first candidate
+(configuration v1, commit `630369a`). Section 28 records the review
+reconciliation (configuration v2). Where the two differ, section 28 supersedes
+sections 1 to 27.
 
 ## 1. Purpose
 
@@ -705,3 +712,453 @@ Candidate commits are on an isolated branch only, to persist the cloud work for
 review. `main` was not changed, no tag was created (in particular no `aven-008`
 tag), nothing was merged and no history was rewritten. The commit and branch
 identifiers are reported in the handoff message.
+
+## 28. Independent review reconciliation (configuration v2)
+
+### 28.1 Verdict and scope
+
+Codex independently reviewed candidate commit
+`630369a45e05f7720db5c7a4ce10d9276465babd`. **Verdict: ACCEPT WITH REQUIRED
+FIXES.** It reported 4 HIGH and 6 MEDIUM findings and required no architecture
+change. Only the accepted corrections were implemented, in a new reconciliation
+commit on the same candidate branch. `630369a` remains an unmodified ancestor.
+
+The review accepted these and they were not redesigned:
+
+- transient numeric signals and the AVEN-008-owned lexical relevance;
+- the ranking weights (0.40 / 0.20 / 0.10 / 0.10 / 0.07 / 0.07 / 0.06), which
+  were not retuned;
+- the 90-day freshness half-life and future-dated exclusion;
+- the monotonic negative penalty with hard suppression at 1;
+- the broker-local bundle and whole-call fail-closed sources;
+- the explicit `referenceTime` and code-point budgets;
+- no embeddings, model call or durable state.
+
+| ID  | Finding                                                                  | Correction (section)                                                                                                       |
+| --- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| H1  | Unbounded source collection: a never-settling source hung `assemble`     | A per-call collection deadline with `source_timeout` (28.3)                                                                |
+| H2  | Foreign-owner records consumed owner quotas and could deny owner context | Recognizable foreign records are dropped before quotas, validation and deduplication; a separate raw resource bound (28.4) |
+| H3  | The public trace revealed cross-owner counts                             | All foreign counts and totals removed from the trace (28.5)                                                                |
+| H4  | A narrow scope with an unresolved declared restriction could apply       | Conservative scope rules v2 (28.6)                                                                                         |
+| M1  | Duplicate candidate or evidence identity consumed several slots          | Structured identity deduplication; conflicts fail closed (28.7)                                                            |
+| M2  | The first non-fitting item blocked smaller items below it                | Skip-and-continue budget traversal (28.8)                                                                                  |
+| M3  | Contradictory direct owner provenance was accepted                       | Local provenance consistency rule (28.9)                                                                                   |
+| M4  | The trace echoed request-derived lexical strings                         | Terms replaced by counts (28.5)                                                                                            |
+| M5  | Exported ranking and source-kind arrays were mutable at runtime          | Deep runtime freezing; private schema instances (28.10)                                                                    |
+| M6  | Malformed collections and getters escaped as raw errors                  | Guarded reads; fixed typed errors without `cause` (28.11)                                                                  |
+
+### 28.2 Configuration and API versions
+
+| Item                                 | v1 (reviewed candidate)             | v2 (this reconciliation)                                         |
+| ------------------------------------ | ----------------------------------- | ---------------------------------------------------------------- |
+| Broker                               | `aven-008-context-broker-v1`        | `aven-008-context-broker-v2`                                     |
+| Configuration                        | `aven-008-context-broker-config-v1` | `aven-008-context-broker-config-v2` (`CONTEXT_BROKER_CONFIG_V2`) |
+| Scope rules                          | v1 (partial label match allowed)    | `aven-008-scope-v2`                                              |
+| Trace                                | v1 (counts, terms)                  | `aven-008-trace-v2`                                              |
+| Relevance                            | `aven-008-lexical-coverage-v1`      | unchanged                                                        |
+| Weights, factors, half-life, budgets | v1 values                           | unchanged                                                        |
+
+Version 1 was a reviewed pre-freeze candidate. It was never frozen, and it was
+superseded after independent review, before AVEN-009 or condition C existed. No
+real-model result informed any fix. The v2 configuration records this in
+`supersedes`. Git commit `630369a` preserves v1 immutably, so its source tree is
+not copied.
+
+Breaking API changes:
+
+- `CONTEXT_BROKER_CONFIG_V1` was renamed to `CONTEXT_BROKER_CONFIG_V2`.
+- `collect(query)` gains an options argument, `collect(query, { signal })`.
+- `BudgetUsage.stopReason` was replaced by `contextBudgetExclusions` and
+  `itemLimitExclusions`.
+- Trace fields changed (28.5).
+- New error codes: `source_timeout`, `source_resource_limit_exceeded` and
+  `conflicting_duplicate`.
+- New exclusion reasons: `duplicate_identity` and `scope_unresolved`.
+
+### 28.3 H1: source-collection deadline
+
+- `SOURCE_COLLECTION_DEADLINE_MS = 5000`: one deadline per `assemble` call
+  covers all sources. It lives in `src/deadline.ts`, the only module allowed a
+  timer.
+- Each source is called as `collect(query, { signal })`. At the deadline the
+  `AbortSignal` aborts, every still-unsettled source rejects internally, and the
+  call fails with `source_timeout`, naming the first such source in `sourceId`
+  order. Sources may honour the signal. The broker does not need them to.
+- The timer is cleared on every path (`finally`). Abort listeners are removed
+  when a source settles. Tests check that no timer remains after a timeout or a
+  success.
+- The timer only bounds waiting. Ranking and freshness still use the request's
+  `referenceTime`. A test fakes a 2031 system clock and a 4-second collection
+  delay and shows byte-identical output to an immediate run. No `Date.now()` is
+  read. The static clock rule still forbids every wall-clock and randomness
+  source in every module, and a per-file rule allows timers only in
+  `deadline.ts`, which only `broker.ts` imports.
+- No retry framework and no `@aven/runtime` or Root dependency was added. The
+  whole-call fail-closed policy is unchanged (review-accepted). There is no
+  optional-source fallback.
+
+### 28.4 H2: foreign records before owner quotas
+
+The collection order is now:
+
+1. **Raw resource bound** (`MAX_RAW_ITEMS_PER_SOURCE = 10000`,
+   `MAX_RAW_ITEMS_TOTAL = 40000`). It is checked on array length alone, before
+   any element is read, whoever owns the items. It protects the process from
+   pathological adapters and is **not** an owner-context quota. Its error
+   (`source_resource_limit_exceeded`) carries a fixed message, no count and no
+   owner information.
+2. **Recognizable foreign records are dropped.** An item is recognizably foreign
+   if it is an object whose `ownerId` is a well-formed owner ID other than the
+   requester's. Only `ownerId` is read, inside a guard. Nothing else of the
+   record is read, validated, counted, deduplicated or traced. A throwing `text`
+   getter on a foreign record is never invoked (tested).
+3. **Owner-context quotas** (500 per source, 2000 in total) apply to the
+   remaining items only.
+4. Validation, then deduplication.
+
+An item whose owner cannot be recognized (a missing or malformed `ownerId`, a
+non-object or a hole) cannot be attributed. It fails closed as
+`invalid_candidate`.
+
+Tests cover each case, and in each the owner's context survives:
+
+- 500 foreign records plus 1 own;
+- 2400 foreign records across four sources (more than the 2000 total quota) plus
+  1 own;
+- a foreign record reusing the owner's candidate ID;
+- a malformed foreign record with a throwing getter, plus a valid own record.
+
+The raw bound is still enforced (10001 items fail).
+
+### 28.5 H3 and M4: trace privacy
+
+Removed from the ordinary trace:
+
+- per-source `returned`, `foreignOwnerExcluded` and
+  `ownerProvenanceMismatchExcluded`;
+- the matching totals;
+- `query.terms`;
+- per-candidate `relevance.matchedTerms`.
+
+They were replaced as follows:
+
+- `query` now holds `termCount`, `contentTermCount` and `qualifierTermCount`.
+- Per-candidate relevance holds `score`, `matchedTermCount` and
+  `matchedContentTermCount`.
+- Each source reports `considered`: the requester's validated candidates only.
+
+The provenance-owner case no longer needs a counter: such candidates now fail
+closed under M3.
+
+Tests show that a source returning only foreign records yields output
+byte-identical to an empty source. Adding 40 foreign exact matches leaves the
+whole bundle and trace byte-identical. A secret in the request and its matched
+terms never appear in the trace. A pinned key-set test rejects any
+reintroduction.
+
+The trace is metadata-oriented: owner-local IDs, reason codes, counts, numbers,
+budget figures and truncation flags. It is **not** a safe place for secrets.
+Caller-chosen source and candidate IDs appear verbatim and are not claimed to be
+secret-free. No private diagnostic mode or telemetry architecture was added.
+
+### 28.6 H4: conservative bounded scope (`aven-008-scope-v2`)
+
+Each dimension declared by a bounded scope is a restriction: `taskId`, `domain`,
+`taskType`, `recipient`, `entity`, `context` and `temporal`.
+
+- If **any** restriction explicitly mismatches, the status is `mismatch`
+  (ineligible).
+- Otherwise, if **any** declared restriction is unresolved because the request
+  does not declare that label, the status is `unresolved`. This is a new
+  eligibility exclusion, `scope_unresolved`. An unresolved restriction is never
+  evidence of applicability. Lexical relevance cannot rescue it, and an exact
+  task binding does not clear it.
+- Only when every declared restriction is satisfied is the status `task_match`
+  (the `taskId` matched) or `label_match`.
+- v1's `partial_label_match` (factor 0.75) and `indeterminate` (0.25) no longer
+  exist. A bounded scope with nothing resolvable is `unresolved`.
+- Uncertain scope applies (`uncertain`, factor 0.25) only if **every**
+  possibility is satisfied. It is `mismatch` if all possibilities mismatch, and
+  `unresolved` otherwise.
+- Unchanged: global (0.5) and unknown (0.25) scope declare no restriction. They
+  stay eligible only through a relevance channel. Explicit mismatch handling is
+  unchanged.
+
+Tested examples:
+
+- `domain=outreach` plus `recipient=recruiter`, with the request establishing
+  only the domain, is excluded (`scope_unresolved`, with
+  `unresolved: ['recipient']`) despite lexical overlap. It applies once the
+  request declares the recipient.
+- A task-bound item with a matching binding but an unresolved recipient is
+  excluded, while the same item without that restriction is a `task_match`.
+
+No semantic scope inference was added. Session-wide scope remains unrepresented
+(review-accepted deferral). The frozen `ScopeSchema` cannot express "any task in
+this session", and task context is not globalized to fake it. No AVEN-010 work
+was done.
+
+### 28.7 M1: identity deduplication
+
+Before eligibility and budgeting, the requester's validated candidates are
+grouped transitively when they share any structured identity:
+
+- the same `candidateId`;
+- the same evidence ID (an `evidence` reference, or a `current_instruction`'s
+  evidence);
+- the same learned item ID **and** version (`owner_state`, `active_task_state`).
+
+There is no text-based or semantic deduplication.
+
+- A **consistent** group (members identical apart from `candidateId`) keeps its
+  first member by `sourceId`, then `candidateId`. The others are excluded as
+  `duplicate_identity`, and the trace points to the kept candidate with
+  `duplicateOf`, which holds owner-local IDs only.
+- An **inconsistent** group fails the call with `conflicting_duplicate`. The
+  broker never chooses between disagreeing trust, scope, provenance, signals or
+  text. One consequence: the same evidence offered both as plain evidence and as
+  a current instruction is a conflict, so adapters must not alias one item under
+  two roles.
+
+Tests:
+
+- the same candidate offered by 3 sources takes 1 slot;
+- 10 aliases of one evidence across sources take 1 slot, while 3 distinct
+  evidence items stay selectable;
+- the same learned version is deduplicated, a different version is not;
+- inconsistent duplicates fail deterministically whatever the source order.
+
+### 28.8 M2: budget traversal
+
+The ranking is walked once:
+
+- an item that fits the remaining characters and item count is included;
+- an item that does not fit the remaining characters is excluded
+  (`context_budget`) and the walk continues;
+- once 10 items are selected, every remaining item is excluded (`item_limit`).
+
+Survivors keep rank order. The policy is
+`rank_order_skip_non_fitting_stop_at_item_limit`. Budget usage reports
+`contextBudgetExclusions` and `itemLimitExclusions`.
+
+Tested:
+
+- the review case: 9700 used, then 500 (excluded), 100 and 100 (both included),
+  for a total of 9900;
+- an item reaching exactly 10000 is included and one reaching 10001 is skipped;
+- 9999 is the stopping point when nothing else fits.
+
+### 28.9 M3: direct owner-provenance consistency
+
+These local schema rules mirror the frozen AVEN-002 evidence rule "owner
+evidence must match its source event and owner":
+
+- Owner-origin provenance (statement, correction or approval) must name the
+  candidate's owner.
+- A **direct** owner-origin reference (`evidence`, or a `current_instruction`'s
+  evidence) must have its event ID equal to the provenance `sourceEventId`.
+
+Learned references (`owner_state`, `active_task_state`) cite supporting events
+separately, so learned-item IDs are never compared with event IDs. The Ledger is
+not queried and lineage is not resolved.
+
+v1 excluded and counted a provenance naming another owner. v2 rejects it as
+`invalid_candidate`, because it is internally contradictory.
+
+Tests:
+
+- a matching direct event is accepted;
+- a mismatched event is rejected, for both evidence and a current instruction;
+- a mismatched owner is rejected;
+- a learned reference citing a separate supporting event is accepted.
+
+### 28.10 M5: runtime-frozen configuration
+
+- Frozen at runtime: `RANKING_FACTORS`, `CONTEXT_SOURCE_KINDS`, the weights, the
+  factor tables, `SOURCE_KIND_REFERENCE_KINDS` (including its nested arrays),
+  `EXCLUSION_REASONS`, `CONTEXT_BROKER_ERROR_CODES`, the word lists and the
+  whole `CONTEXT_BROKER_CONFIG_V2`, recursively.
+- The broker validates with private schema instances. Replacing a method on an
+  exported schema object therefore cannot change broker behaviour (tested).
+- Tests perform real mutation attempts on exported and nested collections:
+  `push`, `splice`, index assignment and nested assignment. Each throws
+  `TypeError`, and a later broker call is byte-identical.
+- Remaining limitation: the frozen AVEN-002 schemas imported from
+  `@aven/contracts` are shared mutable objects. That package is frozen and was
+  not changed.
+
+### 28.11 M6: sanitized typed errors
+
+- Every read of caller or source data runs inside `guard`, which turns any
+  thrown value into a fresh, fixed `ContextBrokerError` and discards the thrown
+  value. That includes options and source registration properties, the request,
+  the collection's length and elements, each item's `ownerId`, and a
+  `structuredClone` snapshot of each own item (getters run once, there).
+- Schema validation then runs on that plain-data snapshot, so no source getter
+  runs during validation.
+- An adapter that throws or rejects with a spoofed `ContextBrokerError` is
+  reported as a fresh `source_failure` or `invalid_candidate`.
+- **v2 errors keep no `cause`.** In v1, validation issues and source errors
+  stayed in `cause` and could carry secrets. `code` and `message` are fixed per
+  code. `sourceId` and `candidateIndex` are owner-local locations.
+- `invalid_score_metadata` is now reported only when every validation issue
+  concerns `signals`. Otherwise the error is `invalid_candidate`.
+
+Tests cover:
+
+- `new Array(1)` and an `undefined` hole;
+- a throwing `text` getter, a nested scope getter and a throwing `ownerId`
+  getter;
+- a throwing `sourceId` registration getter, a hostile `Proxy` options object
+  and a spoofed error from an options getter;
+- a throwing request getter;
+- spoofed broker errors from `collect` and from a getter.
+
+Every case yields a typed error whose message, `String()` and JSON form contain
+no secret, with `cause` undefined.
+
+### 28.12 Async settlement determinism
+
+The review found that a settlement-order mutation survived the candidate's
+tests. A new regression uses four deferred sources and resolves them in four
+different orders across runs. The bundle, selected ordering, trace ordering and
+scores are byte-identical. Mutation R20, which processes sources in settlement
+order, is now caught.
+
+### 28.13 Static guards (secondary)
+
+- The network rule now flags any mention of `fetch` (including destructured or
+  aliased use), any `globalThis` access, and quoted network or process module
+  names (`'node:https'`, `"http"`, and so on).
+- The clock rule is split: wall clock and randomness are banned everywhere, and
+  timers are allowed only in `deadline.ts`.
+- The AVEN-008 frozen-layer test now also walks every frozen tree recursively,
+  skipping `node_modules`. A file added in a **new nested** directory under a
+  frozen package, the dataset, EXP-001 or the source documents fails.
+
+These remain pattern checks, not security proofs.
+
+### 28.14 Mutation results (second round)
+
+Each mutation was applied by script and run against the broker suite plus the
+three frozen-layer suites, using the JSON reporter. Detection counts only test
+assertion failures; no suite failed to load. Every mutated file was restored and
+verified byte-identical by SHA-256, and the 133 tests in those suites passed
+again.
+
+R01 was first written with an overflowing timer delay, which Node clamps to 1
+ms. It was replaced by "the timer never aborts", which is caught by an
+assertion, not a hang: the test races the pending call against a sentinel.
+
+| #   | Mutation                                                      | Caught by (examples)                                      |
+| --- | ------------------------------------------------------------- | --------------------------------------------------------- |
+| R01 | never-resolving source: the deadline never aborts             | H1 timeout test                                           |
+| R02 | foreign flood counted against the owner quota                 | 500-foreign, 2400-foreign and quota tests (3)             |
+| R03 | foreign malformed candidate validated (breaks the owner call) | foreign-not-read test                                     |
+| R04 | foreign duplicate ID breaks the owner's candidate             | foreign ID reuse; unrecognizable owner (3)                |
+| R05 | foreign count added to the public trace                       | foreign-only equals empty; output invariance; key set (3) |
+| R06 | partial narrow scope accepted with an undeclared restriction  | H; H4 recruiter; H4 task binding (3)                      |
+| R07 | task match erases an unresolved restriction                   | H4 task-binding test                                      |
+| R08 | same candidate ID across sources fills slots                  | M1 three-source and alias tests (3)                       |
+| R09 | same evidence reference under aliases fills slots             | M1 alias; learned version; conflict (3)                   |
+| R10 | an inconsistent duplicate silently wins                       | M1 conflict test                                          |
+| R11 | first budget miss blocks later fitting items                  | M2 9700/500/100/100 and 10000/10001 tests (2)             |
+| R12 | mismatched direct owner provenance event accepted             | M3 mismatch test                                          |
+| R13 | query terms (with a secret) in the trace                      | M4 test; pinned key set (2)                               |
+| R14 | matched request terms in the trace                            | M4 test; pinned key set (2)                               |
+| R15 | `RANKING_FACTORS` mutable at runtime                          | M5 mutation test                                          |
+| R16 | `CONTEXT_SOURCE_KINDS` mutable at runtime                     | M5 mutation test                                          |
+| R17 | sparse array holes skipped (silently empty context)           | M6 sparse test                                            |
+| R18 | throwing text getter escapes raw (snapshot unguarded)         | M6 getter and spoof tests (2)                             |
+| R19 | throwing registration getter escapes raw                      | M6 registration test; configuration test (2)              |
+| R20 | sources processed in settlement order                         | async determinism regression                              |
+| R21 | import `@aven/runtime`                                        | import allowlist; runtime rule (2)                        |
+| R22 | storage/Ledger write                                          | storage rule                                              |
+| R23 | AVEN-009 persistence (module-level store)                     | AVEN-009 rule                                             |
+| R24 | infer a correction or negative signal from text               | AH behaviour; AVEN-010 rule (2)                           |
+| R25 | modify a frozen AVEN-007 file                                 | aven-008 frozen-layer test                                |
+| E01 | collection timer never cleared                                | H1 no-timer test                                          |
+| E02 | owner-origin provenance may name another owner                | M3 owner test                                             |
+| E03 | request read unguarded                                        | M6 request getter test (2)                                |
+| E04 | malformed candidates reported as score metadata               | unrecognizable owner; private schema instance (2)         |
+| E05 | budget walk ignores the item limit                            | X; per-source cap; noisy source (3)                       |
+| E06 | uncertain scope applies when any possibility is satisfied     | uncertain-scope test                                      |
+| E07 | a `cause` kept on broker errors                               | M6 sanitation tests (7)                                   |
+| E08 | raw resource bound removed                                    | raw-bound test                                            |
+
+**33 of 33 caught** (the 25 required plus 8 extra). All were restored.
+
+### 28.15 Tests and validation
+
+There are 673 tests in total: the 544 AVEN-001 to AVEN-007 tests, unchanged and
+passing, plus 129 AVEN-008 tests (98 in the reviewed candidate). By file:
+
+| File                                                  | Tests |
+| ----------------------------------------------------- | ----- |
+| `packages/context-broker/test/authority.test.ts`      | 8     |
+| `packages/context-broker/test/boundaries.test.ts`     | 15    |
+| `packages/context-broker/test/budget.test.ts`         | 9     |
+| `packages/context-broker/test/determinism.test.ts`    | 4     |
+| `packages/context-broker/test/eligibility.test.ts`    | 12    |
+| `packages/context-broker/test/isolation.test.ts`      | 10    |
+| `packages/context-broker/test/ranking.test.ts`        | 15    |
+| `packages/context-broker/test/reconciliation.test.ts` | 23    |
+| `packages/context-broker/test/relevance.test.ts`      | 11    |
+| `packages/context-broker/test/sources.test.ts`        | 18    |
+| `tooling/tests/aven-008-frozen-layers.test.ts`        | 4     |
+
+Some v1 tests were rewritten for v2 semantics:
+
+- the pinned configuration;
+- partial and indeterminate scope (now unresolved);
+- the budget-prefix test (now skip and continue);
+- foreign counters (now absent);
+- the provenance-owner exclusion (now rejected);
+- error `cause` (now absent);
+- the tie test, which now uses distinct identities because identical aliases are
+  deduplicated.
+
+The environment was the same isolated Linux x64 cloud container with Node
+24.21.0, Corepack 0.36.0 and pnpm 11.19.0. Every command in section 22 was rerun
+and exited 0, `git diff --check` was clean, and `dataset:check` still reports
+the AVEN-007 dataset valid with `execution=not_run`. **Windows validation is
+pending.** Expected result: 673 tests passing.
+
+### 28.16 Frozen layers
+
+No file outside `packages/context-broker/`, `docs/AVEN_008_REPORT.md`,
+`tooling/tests/aven-008-frozen-layers.test.ts`, `README.md`, `AGENTS.md` and
+`docs/ROADMAP.md` changed in the reconciliation commit. The lockfile and root
+package wiring are unchanged from `630369a`. The aven-008 tripwire still pins
+all 169 other files tracked at `aven-007`, now with the recursive tree check.
+The AVEN-006 and AVEN-007 tripwires pass unchanged. No frozen contract needed to
+change.
+
+### 28.17 Remaining limitations
+
+- All of section 20 still applies: lexical, not semantic, relevance;
+  declarative, not semantic, scope; provisional weights; dependence on upstream
+  metadata; no Owner Model or correction engine yet; no real-model result; no
+  C-versus-B claim.
+- The 5000 ms deadline is a fixed v2 value, not tuned. A source that ignores
+  `signal` keeps running in the background after the timeout; the broker stops
+  waiting but cannot stop it.
+- Fail closed means one broken, slow or conflicting source prevents any context
+  for that call (review-accepted).
+- An item that cannot be attributed to an owner fails the call. A pathological
+  source can still trip the raw resource bound with other owners' data. The
+  error reveals only that a fixed limit was exceeded.
+- Conflicting duplicates fail closed. Adapters must not alias one item under two
+  roles (for example plain evidence and a current instruction) until a later
+  integration defines precedence.
+- The stricter scope rules reduce recall for narrow items when callers declare
+  few task labels. This is intended: an unresolved restriction is not evidence.
+- Shared frozen AVEN-002 schema objects remain mutable in principle (28.10).
+- The trace may contain caller-chosen identifiers verbatim.
+- Static guards are pattern checks, and package separation is not runtime
+  isolation.
+
+AVEN-009 and AVEN-010 were not started: no owner-model persistence, lifecycle
+mutation, promotion, correction interpretation, session override, or negative-
+or supersession-signal generation. `main` and the tags were not changed, and no
+`aven-008` tag exists.

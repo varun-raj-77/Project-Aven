@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CONTEXT_BROKER_CONFIG_V1,
+  CONTEXT_BROKER_CONFIG_V2,
   RANKING_FACTORS,
   RANKING_WEIGHTS_BASIS_POINTS,
   type ContextCandidate,
@@ -52,10 +52,17 @@ describe('AVEN-008 ranking v1 configuration (pre-specified, pinned)', () => {
     ]);
   });
 
-  it('pins the whole versioned configuration object', () => {
-    expect(CONTEXT_BROKER_CONFIG_V1).toEqual({
-      brokerVersion: 'aven-008-context-broker-v1',
-      configVersion: 'aven-008-context-broker-config-v1',
+  it('pins the whole versioned configuration object (v2, weights unchanged)', () => {
+    expect(CONTEXT_BROKER_CONFIG_V2).toEqual({
+      brokerVersion: 'aven-008-context-broker-v2',
+      configVersion: 'aven-008-context-broker-config-v2',
+      supersedes: {
+        configVersion: 'aven-008-context-broker-config-v1',
+        status: 'reviewed_pre_freeze_candidate_never_frozen',
+        reviewedCommit: '630369a45e05f7720db5c7a4ce10d9276465babd',
+        supersededBefore: 'aven-009_and_condition_c_existed',
+        realModelResultInformedChange: false,
+      },
       relevance: {
         version: 'aven-008-lexical-coverage-v1',
         tokenizer: 'aven-008-tokenizer-v1',
@@ -79,14 +86,21 @@ describe('AVEN-008 ranking v1 configuration (pre-specified, pinned)', () => {
         salience: 700,
         trust: 600,
       },
-      scopeFactors: {
-        task_match: 1,
-        label_match: 1,
-        partial_label_match: 0.75,
-        global: 0.5,
-        indeterminate: 0.25,
-        unknown: 0.25,
-        uncertain: 0.25,
+      scope: {
+        version: 'aven-008-scope-v2',
+        boundedRule: 'every_declared_restriction_satisfied',
+        unresolvedRestriction: 'ineligible',
+        taskBindingClearsUnresolved: false,
+        uncertainRule:
+          'every_possibility_satisfied_else_unresolved_or_mismatch',
+        sessionWideScope: 'not_representable_deferred',
+        factors: {
+          task_match: 1,
+          label_match: 1,
+          global: 0.5,
+          unknown: 0.25,
+          uncertain: 0.25,
+        },
       },
       provenanceFactors: {
         explicit_owner_statement: 1,
@@ -107,6 +121,10 @@ describe('AVEN-008 ranking v1 configuration (pre-specified, pinned)', () => {
         active_task_state: 0.5,
         evidence: 0.5,
       },
+      provenanceConsistency: [
+        'owner_origin_provenance_owner_equals_candidate_owner',
+        'direct_owner_origin_evidence_event_equals_provenance_source_event',
+      ],
       freshness: {
         halfLifeDays: 90,
         anchor: 'lastValidatedAt_else_recordedAt',
@@ -116,14 +134,24 @@ describe('AVEN-008 ranking v1 configuration (pre-specified, pinned)', () => {
         penalty: 'multiplicative_one_minus_signal',
         suppressionValue: 1,
       },
+      deduplication: {
+        keys: [
+          'candidateId',
+          'evidence_reference_evidenceId',
+          'learned_reference_learnedItemId_and_version',
+        ],
+        consistentDuplicates: 'keep_first_by_sourceId_then_candidateId',
+        inconsistentDuplicates: 'fail_closed_conflicting_duplicate',
+      },
       eligibility: [
-        'same_owner_else_excluded_before_statistics',
-        'owner_origin_provenance_names_same_owner',
+        'recognizable_foreign_owner_dropped_before_validation_and_quotas',
+        'identity_duplicate_excluded',
         'lifecycle_not_superseded',
         'lifecycle_not_revoked',
         'timestamps_not_after_reference_time',
         'task_binding_matches_request_task',
         'scope_not_explicit_mismatch',
+        'scope_not_unresolved',
         'negative_retrieval_below_suppression_value',
         'at_least_one_relevance_channel',
       ],
@@ -138,31 +166,52 @@ describe('AVEN-008 ranking v1 configuration (pre-specified, pinned)', () => {
         maxSelectedItems: 10,
         maxContextChars: 10000,
         maxItemChars: 1600,
-        policy: 'rank_order_prefix',
+        policy: 'rank_order_skip_non_fitting_stop_at_item_limit',
         itemTruncation: 'code_point_prefix',
       },
+      collection: {
+        deadlineMilliseconds: 5000,
+        deadlineScope: 'one_deadline_per_assemble_call_all_sources',
+        rawResourceLimits: {
+          maxRawItemsPerSource: 10000,
+          maxRawItemsTotal: 40000,
+        },
+        ownerContextQuotas: {
+          maxSources: 16,
+          maxCandidatesPerSource: 500,
+          maxTotalCandidates: 2000,
+        },
+        sourceFailurePolicy: 'fail_closed_whole_assembly',
+        foreignOwnerPolicy: 'drop_recognizable_foreign_first_no_trace',
+        errorPolicy: 'fixed_code_and_message_no_cause',
+      },
       limits: {
-        maxSources: 16,
-        maxCandidatesPerSource: 500,
-        maxTotalCandidates: 2000,
         maxRequestChars: 8000,
         maxCandidateTextChars: 20000,
         maxLabelChars: 256,
         maxMetadataChars: 1000,
         maxLocalIdChars: 128,
       },
-      sourceFailurePolicy: 'fail_closed_whole_assembly',
-      foreignOwnerPolicy: 'exclude_before_statistics_and_count',
+      trace: {
+        version: 'aven-008-trace-v2',
+        content: 'owner_local_ids_codes_counts_numbers_only',
+        excludes: [
+          'item_text',
+          'request_derived_terms',
+          'foreign_owner_ids_counts_or_totals',
+        ],
+      },
       characterUnit: 'unicode_code_point',
     });
-    expect(Object.isFrozen(CONTEXT_BROKER_CONFIG_V1)).toBe(true);
-    expect(Object.isFrozen(CONTEXT_BROKER_CONFIG_V1.weightsBasisPoints)).toBe(
-      true,
-    );
+    expect(Object.isFrozen(CONTEXT_BROKER_CONFIG_V2)).toBe(true);
+    expect(Object.isFrozen(CONTEXT_BROKER_CONFIG_V2.scope.factors)).toBe(true);
+    expect(
+      Object.isFrozen(CONTEXT_BROKER_CONFIG_V2.relevance.tokenizerSteps),
+    ).toBe(true);
   });
 });
 
-describe('AVEN-008 ranking v1 behavior', () => {
+describe('AVEN-008 ranking behavior (unchanged from v1)', () => {
   it('orders by lexical coverage when everything else is equal (D)', async () => {
     const result = await assemble(
       [
@@ -409,7 +458,8 @@ describe('AVEN-008 ranking v1 behavior', () => {
         evidence('y', text),
         evidence('Z', text),
       ];
-      const two = [evidence('y', text)];
+      // A distinct item (identical text, distinct identity) in another source.
+      const two = [evidence('zz', text)];
       const sources = [
         memorySource(
           'source-b',
@@ -426,7 +476,7 @@ describe('AVEN-008 ranking v1 behavior', () => {
     const forward = await build(false);
     const backward = await build(true);
     expect(forward.trace.selected).toEqual([
-      { rank: 1, sourceId: 'source-a', candidateId: 'y' },
+      { rank: 1, sourceId: 'source-a', candidateId: 'zz' },
       { rank: 2, sourceId: 'source-b', candidateId: 'Z' },
       { rank: 3, sourceId: 'source-b', candidateId: 'y' },
       { rank: 4, sourceId: 'source-b', candidateId: 'z' },

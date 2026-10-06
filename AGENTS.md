@@ -132,28 +132,35 @@ allocation at its later freeze. Changing the B configuration, prompt, dataset or
 split requires a new version and a documented experiment change. No real-model
 experiment has been run (`execution: not_run`); scripted-runtime tests are
 mechanics checks, not results. `packages/context-broker` owns the AVEN-008
-Context Broker v1: given an owner-scoped request (explicit `referenceTime`, task
-binding, declared task labels) and transient `ContextCandidate`s from injected
-`ContextSource`s, it excludes other owners' records before any statistic,
-applies eligibility (superseded, revoked, future-dated, task-binding, explicit
-scope mismatch, maximal negative signal, relevance floor), ranks with the
-pre-specified `aven-008-context-broker-config-v1` weights over relevance
-(AVEN-008-owned lexical coverage, not the AVEN-007 BM25), scope, provenance,
-confidence, freshness, salience and trust, applies the negative-retrieval
-penalty, and returns a budgeted `ContextBundle` plus a non-chain-of-thought
-trace. Candidates reuse the frozen AVEN-002 `ContextSource`, `Provenance` and
-`Scope` schemas; they are a retrieval view, not owner state. The broker is
-read/compute-only: no storage, Ledger, runtime, baseline, network, persistence,
-learning, correction inference or authority. Its bundle is not a prompt and is
-not wired into the API paths. Provider credentials, when a later milestone adds
-a live adapter, come from external operator/Root configuration and are never
-stored in the Ledger, owner memory, model input or runtime metadata. Other
-app/package directories remain placeholders. Tooling schemas still describe
-experimental metadata only. No live provider adapter or network model call,
-Strands or other framework adapter, public generation route, typed Owner Model,
-Owner Model retrieval or rebuild, learning algorithms, correction handling,
-negative-signal generation, routing, streaming, tool calling, Root enforcement,
-authentication, UI, execution, scorer, promotion controller, or agent
-orchestration in this milestone. Stop after reporting files, checks,
-assumptions, and deliberate deferrals for external review. Commit only to the
-isolated AVEN-008 candidate branch; do not merge or tag.
+Context Broker, configuration `aven-008-context-broker-config-v2` (v1, commit
+`630369a`, was the reviewed pre-freeze candidate, superseded after independent
+review). Given an owner-scoped request (explicit `referenceTime`, task binding,
+declared task labels) and transient `ContextCandidate`s from injected
+`ContextSource`s, it bounds collection with a deadline and a raw resource limit,
+drops recognizable foreign-owner records before owner quotas, validation,
+deduplication and any statistic, deduplicates by structured identity (failing
+closed on conflicts), applies eligibility (superseded, revoked, future-dated,
+task-binding, explicit scope mismatch, unresolved declared restriction, maximal
+negative signal, relevance floor), ranks with the unchanged pre-specified
+weights over relevance (AVEN-008-owned lexical coverage, not the AVEN-007 BM25),
+scope, provenance, confidence, freshness, salience and trust, applies the
+negative-retrieval penalty, and returns a budgeted `ContextBundle` plus a
+non-chain-of-thought trace that carries no foreign-owner information and no
+request-derived strings. Source-data faults become fixed, typed errors with no
+cause. Candidates reuse the frozen AVEN-002 `ContextSource`, `Provenance` and
+`Scope` schemas; they are a retrieval view, not owner state. Session-wide scope
+is not representable and stays deferred. The broker is read/compute-only: no
+storage, Ledger, runtime, baseline, network, persistence, learning, correction
+inference or authority. Its bundle is not a prompt and is not wired into the API
+paths. Provider credentials, when a later milestone adds a live adapter, come
+from external operator/Root configuration and are never stored in the Ledger,
+owner memory, model input or runtime metadata. Other app/package directories
+remain placeholders. Tooling schemas still describe experimental metadata only.
+No live provider adapter or network model call, Strands or other framework
+adapter, public generation route, typed Owner Model, Owner Model retrieval or
+rebuild, learning algorithms, correction handling, negative-signal generation,
+routing, streaming, tool calling, Root enforcement, authentication, UI,
+execution, scorer, promotion controller, or agent orchestration in this
+milestone. Stop after reporting files, checks, assumptions, and deliberate
+deferrals for external review. Commit only to the isolated AVEN-008 candidate
+branch; do not merge or tag.
