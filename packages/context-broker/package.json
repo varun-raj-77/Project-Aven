@@ -1,0 +1,22 @@
+{
+  "name": "@aven/context-broker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-008 Context Broker v1: deterministic, owner-scoped, budgeted task-context assembly over injected transient candidate sources; no storage, Ledger, model runtime, network, learning or authority",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/context-broker/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

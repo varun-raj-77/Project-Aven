@@ -3,11 +3,12 @@
 ## Authority and scope
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
-reveals a concrete fatal problem. Current authorized work is **AVEN-007 only**:
-the A (Fresh) and B (Naive Personalized) baselines and the prebuilt synthetic
-eval dataset. AVEN-001 through AVEN-006 and MAINT-001 are frozen; the current
-baseline is `8c8228d` (tag `aven-006`). AVEN-007 is not a Strands or framework
-milestone. Do not begin AVEN-008 or commit AVEN-007 before external review.
+reveals a concrete fatal problem. Current authorized work is **AVEN-008 only**:
+the Context Broker (deterministic, owner-scoped, budgeted task-context assembly
+over injected transient candidate sources). AVEN-001 through AVEN-007 and
+MAINT-001 are frozen; the current baseline is `1658eda` (tag `aven-007`). Do not
+begin AVEN-009. AVEN-008 commits belong only on an isolated candidate branch for
+external review: never push to `main`, merge, or create the `aven-008` tag.
 Existing research outside this repository is historical.
 
 Read these sources completely before changing the design:
@@ -16,8 +17,9 @@ Read these sources completely before changing the design:
 2. `docs/sources/AVEN — IMPLEMENTATION INSTRUCTIONS.txt`
 
 The newer Master Description takes precedence when they disagree. In particular,
-AVEN-007 is the naive personalization baseline and prebuilt dataset; success
-requires C to materially beat B, not only A. The current task's explicit
+AVEN-007 is the naive personalization baseline and prebuilt dataset, AVEN-008
+the Context Broker, AVEN-009 the Typed Owner Model and AVEN-010 corrections;
+success requires C to materially beat B, not only A. The current task's explicit
 instructions take precedence over both documents. `docs/AVEN_PRINCIPLES.md`
 records the invariants.
 
@@ -74,9 +76,10 @@ Consequences:
   remain implementation decisions.
 - Run `pnpm check` after relevant changes. Tests cover bootstrap experiment
   discipline, shared contracts, SQLite integrity, Ledger behavior, the local API
-  boundary, the model-runtime boundary and model-output recording path, and the
-  AVEN-007 A/B baselines and dataset integrity, not a complete Aven runtime.
-  Report limitations honestly.
+  boundary, the model-runtime boundary and model-output recording path, the
+  AVEN-007 A/B baselines and dataset integrity, and the AVEN-008 Context
+  Broker's selection mechanics, not a complete Aven runtime. Report limitations
+  honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -128,14 +131,29 @@ promotion-eval or final held-out data; EXP-001 is unchanged and needs its own
 allocation at its later freeze. Changing the B configuration, prompt, dataset or
 split requires a new version and a documented experiment change. No real-model
 experiment has been run (`execution: not_run`); scripted-runtime tests are
-mechanics checks, not results. Provider credentials, when a later milestone adds
+mechanics checks, not results. `packages/context-broker` owns the AVEN-008
+Context Broker v1: given an owner-scoped request (explicit `referenceTime`, task
+binding, declared task labels) and transient `ContextCandidate`s from injected
+`ContextSource`s, it excludes other owners' records before any statistic,
+applies eligibility (superseded, revoked, future-dated, task-binding, explicit
+scope mismatch, maximal negative signal, relevance floor), ranks with the
+pre-specified `aven-008-context-broker-config-v1` weights over relevance
+(AVEN-008-owned lexical coverage, not the AVEN-007 BM25), scope, provenance,
+confidence, freshness, salience and trust, applies the negative-retrieval
+penalty, and returns a budgeted `ContextBundle` plus a non-chain-of-thought
+trace. Candidates reuse the frozen AVEN-002 `ContextSource`, `Provenance` and
+`Scope` schemas; they are a retrieval view, not owner state. The broker is
+read/compute-only: no storage, Ledger, runtime, baseline, network, persistence,
+learning, correction inference or authority. Its bundle is not a prompt and is
+not wired into the API paths. Provider credentials, when a later milestone adds
 a live adapter, come from external operator/Root configuration and are never
 stored in the Ledger, owner memory, model input or runtime metadata. Other
 app/package directories remain placeholders. Tooling schemas still describe
 experimental metadata only. No live provider adapter or network model call,
-Strands or other framework adapter, public generation route, Context Broker,
+Strands or other framework adapter, public generation route, typed Owner Model,
 Owner Model retrieval or rebuild, learning algorithms, correction handling,
-routing, streaming, tool calling, Root enforcement, authentication, UI,
-execution, scorer, promotion controller, or agent orchestration in this
-milestone. Stop after reporting files, checks, assumptions, and deliberate
-deferrals for external review. Do not commit yet.
+negative-signal generation, routing, streaming, tool calling, Root enforcement,
+authentication, UI, execution, scorer, promotion controller, or agent
+orchestration in this milestone. Stop after reporting files, checks,
+assumptions, and deliberate deferrals for external review. Commit only to the
+isolated AVEN-008 candidate branch; do not merge or tag.
