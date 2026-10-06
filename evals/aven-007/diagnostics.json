@@ -1,0 +1,126 @@
+{
+  "note": "Lexical construction diagnostics of the naive history search over the dataset. Not model accuracy, not a B score, not a target. No model was run.",
+  "development": {
+    "cases": 48,
+    "casesWithSupportingHistory": 28,
+    "supportingRecords": 28,
+    "supportingRecordsRetrieved": 20,
+    "casesRetrievingAnySupporting": 20,
+    "casesRetrievingEverySupporting": 20,
+    "casesWithSupportingRecordAtRank1": 10,
+    "meanSharedQueryTokensSupporting": 1.786,
+    "staleOrConflictingRecords": 8,
+    "staleOrConflictingRecordsRetrieved": 8,
+    "distractorRecords": 524,
+    "distractorRecordsWithAnySharedToken": 151,
+    "meanSharedQueryTokensDistractor": 0.332,
+    "distractorRecordsRetrieved": 128,
+    "corpusSize": {
+      "min": 6,
+      "median": 10,
+      "max": 24,
+      "histogram": {
+        "6": 15,
+        "10": 13,
+        "14": 1,
+        "16": 14,
+        "18": 3,
+        "24": 2
+      }
+    },
+    "positiveCandidates": {
+      "min": 0,
+      "median": 3,
+      "max": 13,
+      "histogram": {
+        "0": 7,
+        "1": 3,
+        "2": 8,
+        "3": 13,
+        "4": 7,
+        "5": 3,
+        "7": 1,
+        "10": 1,
+        "12": 2,
+        "13": 3
+      }
+    },
+    "casesWithMorePositiveCandidatesThanTopK": 6,
+    "selectedHistoryItems": {
+      "min": 0,
+      "median": 3,
+      "max": 8,
+      "histogram": {
+        "0": 7,
+        "1": 3,
+        "2": 8,
+        "3": 13,
+        "4": 7,
+        "5": 3,
+        "7": 1,
+        "8": 6
+      }
+    }
+  },
+  "held_out": {
+    "cases": 16,
+    "casesWithSupportingHistory": 10,
+    "supportingRecords": 10,
+    "supportingRecordsRetrieved": 6,
+    "casesRetrievingAnySupporting": 6,
+    "casesRetrievingEverySupporting": 6,
+    "casesWithSupportingRecordAtRank1": 4,
+    "meanSharedQueryTokensSupporting": 2,
+    "staleOrConflictingRecords": 4,
+    "staleOrConflictingRecordsRetrieved": 4,
+    "distractorRecords": 172,
+    "distractorRecordsWithAnySharedToken": 56,
+    "meanSharedQueryTokensDistractor": 0.36,
+    "distractorRecordsRetrieved": 52,
+    "corpusSize": {
+      "min": 6,
+      "median": 10,
+      "max": 16,
+      "histogram": {
+        "6": 3,
+        "10": 6,
+        "14": 2,
+        "16": 5
+      }
+    },
+    "positiveCandidates": {
+      "min": 0,
+      "median": 4,
+      "max": 11,
+      "histogram": {
+        "0": 1,
+        "1": 2,
+        "2": 1,
+        "3": 3,
+        "4": 3,
+        "5": 3,
+        "6": 1,
+        "10": 1,
+        "11": 1
+      }
+    },
+    "casesWithMorePositiveCandidatesThanTopK": 2,
+    "selectedHistoryItems": {
+      "min": 0,
+      "median": 4,
+      "max": 8,
+      "histogram": {
+        "0": 1,
+        "1": 2,
+        "2": 1,
+        "3": 3,
+        "4": 3,
+        "5": 3,
+        "6": 1,
+        "8": 2
+      }
+    }
+  },
+  "repeatedHistoryTextsAcrossFamilies": 0,
+  "maxFamiliesSharingOneHistoryText": 1
+}

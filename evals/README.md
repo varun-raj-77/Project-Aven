@@ -1,8 +1,13 @@
 # Evaluation scaffolding
 
-`datasets/`, `held-out/`, `scorers/`, and `regression/` are empty placeholders.
-No fixtures, private cases, scorers, or runtime regression suite are
-implemented. The root Vitest tests validate bootstrap metadata only.
+`aven-007/` holds the synthetic AVEN-007 dataset version 2 (64 cases, 32
+families, 48 development / 16 held-out) with model-visible `cases.jsonl`,
+scorer-only oracle, exposure-control, construction and diagnostics files, a
+hash-checked manifest, and the byte-identical archive of the reviewed v1
+candidate; see its README. Its held-out split is frozen but not secret and is
+not EXP-001 promotion-eval or final held-out data. `datasets/`, `held-out/`,
+`scorers/`, and `regression/` remain empty placeholders. No scorer or runtime
+regression suite is implemented, and no model has been run on any case.
 
 Later dataset records need owner/fixture identity, consent or synthetic label,
 episode/scenario group, source references, expected scope/application and

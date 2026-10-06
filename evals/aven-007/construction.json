@@ -1,0 +1,453 @@
+{
+  "note": "Construction intent fixed before any v2 diagnostic was computed: designed lexical overlap of the primary supporting history record with the request (high >= 3 shared content tokens, partial 1-2, low 0, none = no supporting history, n/a = behavior driven by profile or request) and corpus size class (S 6, M 10, L 16 records) assigned by global case position, independent of split. topKCompetitionRecords: 8 extra lexically overlapping distractors in a fixed competition set (6 of 48 development and 2 of 16 held-out cases), added after the first v2 draft had no case with more positive candidates than top-K. Not a target and not a result.",
+  "cases": [
+    {
+      "caseId": "aven007-pa-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-pa-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pa-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pn-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-pr-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-pr-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-pr-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-cs-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-cs-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ca-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-er-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-er-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-er-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-dp-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "high",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "partial",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-dp-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "low",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-01-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-01-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-02-v1",
+      "split": "development",
+      "designedSupportingOverlap": "none",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-02-v2",
+      "split": "development",
+      "designedSupportingOverlap": "none",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-03-v1",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 8
+    },
+    {
+      "caseId": "aven007-ir-03-v2",
+      "split": "development",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "S",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-04-v1",
+      "split": "held_out",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "L",
+      "topKCompetitionRecords": 0
+    },
+    {
+      "caseId": "aven007-ir-04-v2",
+      "split": "held_out",
+      "designedSupportingOverlap": "n/a",
+      "sizeClass": "M",
+      "topKCompetitionRecords": 0
+    }
+  ]
+}

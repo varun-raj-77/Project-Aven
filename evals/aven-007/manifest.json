@@ -1,0 +1,154 @@
+{
+  "datasetId": "AVEN-007-DATASET-001",
+  "datasetVersion": "2.0.0",
+  "milestone": "AVEN-007",
+  "contentStatus": "candidate_pending_final_external_verification",
+  "dataProvenance": "synthetic",
+  "containsRealOwnerData": false,
+  "counts": {
+    "cases": 64,
+    "development": 48,
+    "heldOut": 16,
+    "families": 32,
+    "casesPerFamily": 2,
+    "categories": 8,
+    "perCategory": {
+      "preference_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "preference_non_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "procedure_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "changed_or_stale_preference": {
+        "development": 6,
+        "held_out": 2
+      },
+      "conflict_or_ambiguity": {
+        "development": 6,
+        "held_out": 2
+      },
+      "episodic_recall": {
+        "development": 6,
+        "held_out": 2
+      },
+      "disagreement_preservation": {
+        "development": 6,
+        "held_out": 2
+      },
+      "irrelevant_history_resistance": {
+        "development": 6,
+        "held_out": 2
+      }
+    }
+  },
+  "splitPolicy": {
+    "unit": "scenario_family",
+    "heldOutShare": 0.25,
+    "developmentFamiliesPerCategory": 3,
+    "heldOutFamiliesPerCategory": 1,
+    "heldOutSecret": false,
+    "heldOutStatus": "frozen_version_controlled_not_secret",
+    "defaultAccess": "development_only",
+    "heldOutAccess": "explicit_opt_in",
+    "heldOutRole": "aven007_baseline_asset_not_promotion_eval_not_exp001_final_held_out",
+    "exp001Relationship": "separate_asset_no_automatic_reuse_exp001_unchanged"
+  },
+  "baseline": {
+    "configuration": {
+      "version": "aven-007-baseline-config-v2",
+      "conditions": ["fresh", "naive_personalized"],
+      "profile": {
+        "format": "ordered_free_text_entries",
+        "maxEntries": 64,
+        "maxEntryChars": 1000,
+        "maxContextChars": 4000,
+        "truncation": "owner_order_prefix_at_entry_boundary"
+      },
+      "history": {
+        "algorithm": "bm25",
+        "version": "aven-007-naive-history-search-v2",
+        "tokenizer": "aven-007-tokenizer-v2",
+        "tokenizerSteps": [
+          "unicode_nfkc",
+          "lowercase_locale_independent",
+          "expand_negative_contractions_to_not",
+          "split_on_non_letter_mark_number",
+          "remove_STOPWORDS_V2",
+          "harman_s_stemmer"
+        ],
+        "k1": 1.2,
+        "b": 0.75,
+        "idf": "ln(1 + (N - df + 0.5) / (df + 0.5))",
+        "queryTerms": "unique_tokens_of_current_request",
+        "topK": 8,
+        "minimumScoreExclusive": 0,
+        "maxContextChars": 6000,
+        "maxItemChars": 1200,
+        "ordering": [
+          "score_descending",
+          "occurredAt_descending",
+          "eventId_ascending_code_unit"
+        ],
+        "budgetPolicy": "rank_order_prefix"
+      },
+      "precedence": [
+        "current_request",
+        "editable_profile",
+        "retrieved_history"
+      ],
+      "characterUnit": "unicode_code_point"
+    },
+    "configVersion": "aven-007-baseline-config-v2",
+    "tokenizerVersion": "aven-007-tokenizer-v2",
+    "stopwordsVersion": "STOPWORDS_V2",
+    "stopwordsSha256": "e75335b7b2475f1c65ce0b642fd47934f19575eccdaa647b7cca124e7cf700e9",
+    "promptVersion": "aven-007-baseline-prompt-v1",
+    "promptSha256": "30ec7b1494da367c8295354c6f3538d614b66b855c28a79fa0d4c5cc30efcfad",
+    "contextLabel": "BASELINE_CONTEXT_V1"
+  },
+  "files": {
+    "cases.jsonl": {
+      "role": "model_visible_inputs",
+      "sha256": "a598b6d4bf3a3c478406d0f198a7f0f810ee5a60d59fe21d63e7df7291425190"
+    },
+    "oracle.jsonl": {
+      "role": "scorer_only_behavior_and_diagnostics",
+      "sha256": "dd1d192d563e0fcd8c52e5d840270afabc388da078e7adc642d20620ec1b832f"
+    },
+    "b-mechanics-controls.json": {
+      "role": "scorer_only_b_mechanics_exposure_controls",
+      "sha256": "cea4acf336a26cf94b36dc848c189d3deca5fb6cd9a819a9076b480ab2f8208c"
+    },
+    "construction.json": {
+      "role": "scorer_only_construction_intent",
+      "sha256": "29db270d2612179ce21529761ff9d8d8712ecc0cf49af1ced9a627f2589e0f2e"
+    },
+    "diagnostics.json": {
+      "role": "scorer_only_lexical_diagnostics",
+      "sha256": "e4a18afa5074890559d8f65536f5054f173c5551841d4d48fa33f48e064a66b5"
+    }
+  },
+  "supersedes": {
+    "datasetVersion": "1.0.0",
+    "status": "superseded_pre_freeze_after_independent_review",
+    "archivePath": "evals/aven-007/reviewed-v1/",
+    "casesSha256": "162a879729293a28bad2afdec54936b66d0ad05aec56315afeed3295c1184cc8",
+    "oracleSha256": "5798eb24b68cffbc00ad40d9a76fd88ab8b7c83fd0a92800d19f18c0b388ff58",
+    "manifestSha256": "d6dc4bcdf3fbcb480f45222d2dc14aeaf7c3a8b0f4d4f60951570f8ba03f4205",
+    "baselineConfigVersion": "aven-007-baseline-config-v1",
+    "tokenizerVersion": "aven-007-tokenizer-v1",
+    "stopwordsSha256": "74c2b0c091c094aa2b24a3a3d052e4585354891d78d88cdb0862ba239c71daae",
+    "reason": "Independent external review (Codex, ACCEPT WITH REQUIRED FIXES) findings H1-H3 and M1-M4. v1 was never frozen as the final benchmark and was superseded before any condition C implementation or real-model result existed."
+  },
+  "execution": {
+    "status": "not_run",
+    "results": null,
+    "note": "No real or local foundation-model run has been performed. Scripted-runtime tests validate harness mechanics only and are not experimental results."
+  }
+}

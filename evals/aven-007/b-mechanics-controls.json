@@ -1,0 +1,137 @@
+{
+  "purpose": "B-mechanics exposure controls only. They assert that the naive lexical search exposes history the case purpose depends on. They are NOT behavioral success criteria and must not be applied to condition C.",
+  "controls": [
+    {
+      "caseId": "aven007-cs-01-v1",
+      "mechanism": "stale and newer history instructions are both exposed to B",
+      "mustRetrieveEventIds": ["event_syn_cs01_v1_01", "event_syn_cs01_v1_02"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-01-v2",
+      "mechanism": "stale and newer history instructions are both exposed to B",
+      "mustRetrieveEventIds": ["event_syn_cs01_v2_01", "event_syn_cs01_v2_02"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-02-v1",
+      "mechanism": "older conflicting history is exposed to B alongside the current profile",
+      "mustRetrieveEventIds": ["event_syn_cs02_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-02-v2",
+      "mechanism": "older conflicting history is exposed to B alongside the current profile",
+      "mustRetrieveEventIds": ["event_syn_cs02_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-03-v1",
+      "mechanism": "stale and newer history instructions are both exposed to B",
+      "mustRetrieveEventIds": ["event_syn_cs03_v1_01", "event_syn_cs03_v1_02"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-03-v2",
+      "mechanism": "stale and newer history instructions are both exposed to B",
+      "mustRetrieveEventIds": ["event_syn_cs03_v2_01", "event_syn_cs03_v2_02"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-04-v1",
+      "mechanism": "older conflicting history is exposed to B alongside the current profile",
+      "mustRetrieveEventIds": ["event_syn_cs04_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-cs-04-v2",
+      "mechanism": "older conflicting history is exposed to B alongside the current profile",
+      "mustRetrieveEventIds": ["event_syn_cs04_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ca-02-v1",
+      "mechanism": "specific history statement conflicting with the general profile is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ca02_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ca-02-v2",
+      "mechanism": "specific history statement conflicting with the general profile is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ca02_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ca-04-v1",
+      "mechanism": "the two-office fact is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ca04_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ca-04-v2",
+      "mechanism": "the two-office fact is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ca04_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-dp-03-v1",
+      "mechanism": "the supportive-tone instruction is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_dp03_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-dp-03-v2",
+      "mechanism": "the supportive-tone instruction is exposed to B",
+      "mustRetrieveEventIds": ["event_syn_dp03_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-01-v1",
+      "mechanism": "the injected instruction is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir01_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-01-v2",
+      "mechanism": "the injected instruction is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir01_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-02-v1",
+      "mechanism": "zero lexical overlap: B must retrieve nothing",
+      "mustRetrieveEventIds": [],
+      "mustRetrieveNothing": true
+    },
+    {
+      "caseId": "aven007-ir-02-v2",
+      "mechanism": "zero lexical overlap: B must retrieve nothing",
+      "mustRetrieveEventIds": [],
+      "mustRetrieveNothing": true
+    },
+    {
+      "caseId": "aven007-ir-03-v1",
+      "mechanism": "historical permission text is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir03_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-03-v2",
+      "mechanism": "historical permission text is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir03_v2_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-04-v1",
+      "mechanism": "homonym record is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir04_v1_01"],
+      "mustRetrieveNothing": false
+    },
+    {
+      "caseId": "aven007-ir-04-v2",
+      "mechanism": "homonym record is retrieved and exposed to B",
+      "mustRetrieveEventIds": ["event_syn_ir04_v2_01"],
+      "mustRetrieveNothing": false
+    }
+  ]
+}

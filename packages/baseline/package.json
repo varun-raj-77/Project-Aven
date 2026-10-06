@@ -1,0 +1,23 @@
+{
+  "name": "@aven/baseline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-007 experiment baselines: A (Fresh) and B (Naive Personalized: editable profile + deterministic lexical history search) over the AVEN-006 runtime; no storage, Ledger, learning, Context Broker or provider adapter",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/baseline/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "@aven/runtime": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

@@ -3,12 +3,12 @@
 ## Authority and scope
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
-reveals a concrete fatal problem. Current authorized work is **AVEN-006 only**:
-the provider-neutral model/runtime abstraction and the separate in-process
-model-output recording path. AVEN-001 through AVEN-005 and MAINT-001 are frozen;
-the current baseline is `f28994a` (tag `aven-005`). Do not begin AVEN-007 or
-commit AVEN-006 before external review. Existing research outside this
-repository is historical.
+reveals a concrete fatal problem. Current authorized work is **AVEN-007 only**:
+the A (Fresh) and B (Naive Personalized) baselines and the prebuilt synthetic
+eval dataset. AVEN-001 through AVEN-006 and MAINT-001 are frozen; the current
+baseline is `8c8228d` (tag `aven-006`). AVEN-007 is not a Strands or framework
+milestone. Do not begin AVEN-008 or commit AVEN-007 before external review.
+Existing research outside this repository is historical.
 
 Read these sources completely before changing the design:
 
@@ -74,8 +74,9 @@ Consequences:
   remain implementation decisions.
 - Run `pnpm check` after relevant changes. Tests cover bootstrap experiment
   discipline, shared contracts, SQLite integrity, Ledger behavior, the local API
-  boundary, and the model-runtime boundary and model-output recording path, not
-  a complete Aven runtime. Report limitations honestly.
+  boundary, the model-runtime boundary and model-output recording path, and the
+  AVEN-007 A/B baselines and dataset integrity, not a complete Aven runtime.
+  Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -105,13 +106,36 @@ normalized runtime errors, cancellation/timeout, strict result validation, and a
 test-only scripted runtime (`@aven/runtime/testing`). A runtime generates; it
 never owns storage, the Ledger, owner state, Root, permissions or tools, and its
 output is data, never authority or learned state. Runtime selection is explicit
-injection; there is no router. Provider credentials, when a later milestone adds
+injection; there is no router. `packages/baseline` owns the AVEN-007 baselines:
+A `fresh` and B `naive_personalized` share one injected runtime, one versioned
+base prompt (`BASELINE_SYSTEM_PROMPT_V1`), one call path and one timeout; they
+differ only in the personalization payload (an explicit, manually edited
+free-text profile plus `NaiveHistorySearch`, a deterministic owner-filtered BM25
+over normalized history input, configuration `aven-007-baseline-config-v2` with
+tokenizer v2). The harness controls only the injected runtime object, call path,
+request shape and timeout; real-model paired runs must compare reported runtime
+and model stamps. It owns no storage or Ledger persistence, never auto-edits the
+profile, learns nothing, and is not the Context Broker or Owner Model.
+`evals/aven-007/` holds the synthetic dataset v2: model-visible `cases.jsonl`;
+scorer-only `oracle.jsonl` (behavior is primary, context IDs are diagnostic
+only), B-mechanics exposure controls, construction intent and lexical
+diagnostics (never read by production code); and a hash-checked `manifest.json`.
+`reviewed-v1/` preserves the superseded reviewed v1 candidate byte-for-byte and
+is never used. `loadBaselineCases` returns development cases unless held-out
+access is explicit; `parseAllBaselineCasesForValidation` is for validation only.
+The held-out split is frozen but not secret, and it is not EXP-001
+promotion-eval or final held-out data; EXP-001 is unchanged and needs its own
+allocation at its later freeze. Changing the B configuration, prompt, dataset or
+split requires a new version and a documented experiment change. No real-model
+experiment has been run (`execution: not_run`); scripted-runtime tests are
+mechanics checks, not results. Provider credentials, when a later milestone adds
 a live adapter, come from external operator/Root configuration and are never
 stored in the Ledger, owner memory, model input or runtime metadata. Other
 app/package directories remain placeholders. Tooling schemas still describe
 experimental metadata only. No live provider adapter or network model call,
-public generation route, prompt personalization, Context Broker, Owner Model
-retrieval or rebuild, learning algorithms, routing, streaming, tool calling,
-Root enforcement, authentication, UI, execution, promotion controller, or agent
-orchestration in this milestone. Stop after reporting files, checks,
-assumptions, and deliberate deferrals for external review. Do not commit yet.
+Strands or other framework adapter, public generation route, Context Broker,
+Owner Model retrieval or rebuild, learning algorithms, correction handling,
+routing, streaming, tool calling, Root enforcement, authentication, UI,
+execution, scorer, promotion controller, or agent orchestration in this
+milestone. Stop after reporting files, checks, assumptions, and deliberate
+deferrals for external review. Do not commit yet.

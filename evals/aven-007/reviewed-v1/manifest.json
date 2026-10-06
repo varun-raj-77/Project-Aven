@@ -1,0 +1,118 @@
+{
+  "datasetId": "AVEN-007-DATASET-001",
+  "datasetVersion": "1.0.0",
+  "milestone": "AVEN-007",
+  "contentStatus": "frozen",
+  "dataProvenance": "synthetic",
+  "containsRealOwnerData": false,
+  "counts": {
+    "cases": 64,
+    "development": 48,
+    "heldOut": 16,
+    "families": 32,
+    "casesPerFamily": 2,
+    "categories": 8,
+    "perCategory": {
+      "preference_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "preference_non_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "procedure_application": {
+        "development": 6,
+        "held_out": 2
+      },
+      "changed_or_stale_preference": {
+        "development": 6,
+        "held_out": 2
+      },
+      "conflict_or_ambiguity": {
+        "development": 6,
+        "held_out": 2
+      },
+      "episodic_recall": {
+        "development": 6,
+        "held_out": 2
+      },
+      "disagreement_preservation": {
+        "development": 6,
+        "held_out": 2
+      },
+      "irrelevant_history_resistance": {
+        "development": 6,
+        "held_out": 2
+      }
+    }
+  },
+  "splitPolicy": {
+    "unit": "scenario_family",
+    "heldOutShare": 0.25,
+    "developmentFamiliesPerCategory": 3,
+    "heldOutFamiliesPerCategory": 1,
+    "heldOutSecret": false,
+    "heldOutStatus": "frozen_version_controlled_not_secret",
+    "defaultAccess": "development_only",
+    "heldOutAccess": "explicit_opt_in",
+    "promotionEvalSplit": "not_created"
+  },
+  "baseline": {
+    "configuration": {
+      "version": "aven-007-baseline-config-v1",
+      "conditions": ["fresh", "naive_personalized"],
+      "profile": {
+        "format": "ordered_free_text_entries",
+        "maxEntries": 64,
+        "maxEntryChars": 1000,
+        "maxContextChars": 4000,
+        "truncation": "owner_order_prefix_at_entry_boundary"
+      },
+      "history": {
+        "algorithm": "bm25",
+        "version": "aven-007-naive-history-search-v1",
+        "tokenizer": "aven-007-tokenizer-v1",
+        "k1": 1.2,
+        "b": 0.75,
+        "idf": "ln(1 + (N - df + 0.5) / (df + 0.5))",
+        "queryTerms": "unique_tokens_of_current_request",
+        "topK": 8,
+        "minimumScoreExclusive": 0,
+        "maxContextChars": 6000,
+        "maxItemChars": 1200,
+        "ordering": [
+          "score_descending",
+          "occurredAt_descending",
+          "eventId_ascending_code_unit"
+        ],
+        "budgetPolicy": "rank_order_prefix"
+      },
+      "precedence": [
+        "current_request",
+        "editable_profile",
+        "retrieved_history"
+      ],
+      "characterUnit": "unicode_code_point"
+    },
+    "promptVersion": "aven-007-baseline-prompt-v1",
+    "promptSha256": "30ec7b1494da367c8295354c6f3538d614b66b855c28a79fa0d4c5cc30efcfad",
+    "contextLabel": "BASELINE_CONTEXT_V1",
+    "stopwordsSha256": "74c2b0c091c094aa2b24a3a3d052e4585354891d78d88cdb0862ba239c71daae"
+  },
+  "files": {
+    "cases.jsonl": {
+      "role": "model_visible_inputs",
+      "sha256": "162a879729293a28bad2afdec54936b66d0ad05aec56315afeed3295c1184cc8"
+    },
+    "oracle.jsonl": {
+      "role": "scorer_only_expectations",
+      "sha256": "5798eb24b68cffbc00ad40d9a76fd88ab8b7c83fd0a92800d19f18c0b388ff58"
+    }
+  },
+  "execution": {
+    "status": "not_run",
+    "results": null,
+    "note": "No real or local foundation-model run has been performed. Scripted-runtime tests validate harness mechanics only and are not experimental results."
+  }
+}
