@@ -1,39 +1,50 @@
 /**
- * Context Broker failures. The public message is fixed per code, so source
- * error text, candidate content and validation detail never cross this
- * boundary through it. Validation issues or a source's original error are kept
- * only in `cause` for in-process diagnosis; callers must never serialize
- * `cause`. `sourceId` (a caller-registered identifier) and `candidateIndex`
- * locate the failing input without exposing it.
+ * Context Broker failures (error policy v2).
  *
- * Owner isolation is not an error: candidates of another owner are excluded
- * before any statistic and only counted in the trace (see `broker.ts`).
+ * The public `code` and `message` are fixed per code. Source error text,
+ * candidate content, validation detail and thrown adapter values never cross
+ * this boundary: v2 keeps NO `cause` (v1 kept validation issues and source
+ * errors there, which could carry secrets). `sourceId` (a caller-registered
+ * identifier) and `candidateIndex` locate the failing input without exposing
+ * it; they are owner-local locations, not guaranteed secret-free.
+ *
+ * Owner isolation is not an error: recognizable foreign records are dropped
+ * before validation and leave no count or trace (see `broker.ts`).
  */
 export type ContextBrokerErrorCode =
   | 'invalid_configuration'
   | 'invalid_request'
   | 'source_failure'
+  | 'source_timeout'
+  | 'source_resource_limit_exceeded'
   | 'candidate_limit_exceeded'
   | 'invalid_candidate'
-  | 'invalid_score_metadata';
+  | 'invalid_score_metadata'
+  | 'conflicting_duplicate';
 
-const messages: Record<ContextBrokerErrorCode, string> = {
-  invalid_configuration: 'The Context Broker source configuration is invalid',
-  invalid_request:
-    'The context request is malformed; no context source was queried',
-  source_failure:
-    'A context source failed or returned a malformed collection; no context was assembled',
-  candidate_limit_exceeded:
-    'A context source exceeded the candidate collection limit; no context was assembled',
-  invalid_candidate:
-    'A context candidate is malformed; no context was assembled',
-  invalid_score_metadata:
-    'A context candidate has invalid ranking signal metadata; no context was assembled',
-};
+const messages: Readonly<Record<ContextBrokerErrorCode, string>> =
+  Object.freeze({
+    invalid_configuration: 'The Context Broker source configuration is invalid',
+    invalid_request:
+      'The context request is malformed; no context source was queried',
+    source_failure:
+      'A context source failed or returned a malformed collection; no context was assembled',
+    source_timeout:
+      'A context source did not finish before the collection deadline; no context was assembled',
+    source_resource_limit_exceeded:
+      'A context source exceeded the raw collection resource limit; no context was assembled',
+    candidate_limit_exceeded:
+      'A context source exceeded the owner-context candidate quota; no context was assembled',
+    invalid_candidate:
+      'A context candidate is malformed; no context was assembled',
+    invalid_score_metadata:
+      'A context candidate has invalid ranking signal metadata; no context was assembled',
+    conflicting_duplicate:
+      'Context candidates share an identity but disagree; no context was assembled',
+  });
 
-export const CONTEXT_BROKER_ERROR_CODES = Object.freeze(
-  Object.keys(messages) as ContextBrokerErrorCode[],
-);
+export const CONTEXT_BROKER_ERROR_CODES: readonly ContextBrokerErrorCode[] =
+  Object.freeze(Object.keys(messages) as ContextBrokerErrorCode[]);
 
 export interface ContextBrokerErrorLocation {
   readonly sourceId?: string;
@@ -47,11 +58,11 @@ export class ContextBrokerError extends Error {
   constructor(
     code: ContextBrokerErrorCode,
     location: ContextBrokerErrorLocation = {},
-    cause?: unknown,
   ) {
-    super(messages[code], { cause });
+    const safe = Object.hasOwn(messages, code) ? code : 'source_failure';
+    super(messages[safe]);
     this.name = 'ContextBrokerError';
-    this.code = code;
+    this.code = safe;
     this.sourceId = location.sourceId;
     this.candidateIndex = location.candidateIndex;
   }

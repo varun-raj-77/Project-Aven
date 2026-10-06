@@ -99,61 +99,92 @@ describe('AVEN-008 budgets and truncation (code-point semantics)', () => {
     );
   });
 
-  it('keeps the total within 10000 code points as a rank-order prefix (W)', async () => {
-    const big = (i: number) =>
-      evidence(`big-${i}`, `Budget ${codePoints(1593, 'x')}`, {
-        signals: ranked(i),
-      });
+  /** An eligible item of exactly `chars` code points ranked by `rank`. */
+  const sized = (id: string, chars: number, rank: number) =>
+    evidence(
+      id,
+      chars === 6 ? 'Budget' : `Budget ${codePoints(chars - 7, 'x')}`,
+      {
+        signals: ranked(rank),
+      },
+    );
+  const bigs = (n: number) =>
+    Array.from({ length: n }, (_, i) => sized(`big-${i}`, 1600, i));
+
+  it('skips a non-fitting item and keeps filling with later items (W, M2)', async () => {
+    // 9700 used, then 500 (does not fit), then 100 and 100 (both fit).
     const result = await assemble(
       [
         memorySource('episodes', 'episode_history', [
-          ...Array.from({ length: 7 }, (_, i) => big(i)),
-          evidence('small-after', 'Budget memo', { signals: ranked(50) }),
+          ...bigs(6),
+          sized('fill-100', 100, 10),
+          sized('next-500', 500, 11),
+          sized('then-100-a', 100, 12),
+          sized('then-100-b', 100, 13),
         ]),
       ],
       request('Budget review'),
     );
-    expect(selectedIds(result)).toEqual(
-      Array.from({ length: 6 }, (_, i) => `big-${i}`),
-    );
+    expect(selectedIds(result)).toEqual([
+      ...Array.from({ length: 6 }, (_, i) => `big-${i}`),
+      'fill-100',
+      'then-100-a',
+      'then-100-b',
+    ]);
+    expect(traceOf(result, 'next-500').exclusionReason).toBe('context_budget');
+    expect(traceOf(result, 'next-500').eligibleRank).toBe(8);
     expect(result.bundle.budget).toEqual({
       characterUnit: 'unicode_code_point',
       maxSelectedItems: 10,
       maxContextChars: 10000,
       maxItemChars: 1600,
-      selectedItems: 6,
-      usedChars: 9600,
+      selectedItems: 9,
+      usedChars: 9900,
       truncatedItems: 0,
-      stopReason: 'context_budget',
+      contextBudgetExclusions: 1,
+      itemLimitExclusions: 0,
     });
-    expect(traceOf(result, 'big-6').exclusionReason).toBe('context_budget');
-    // Prefix policy: a smaller, lower-ranked item is not packed in afterwards.
-    expect(traceOf(result, 'small-after').exclusionReason).toBe(
-      'context_budget',
+    // Survivors keep rank order.
+    expect(result.bundle.items.map((i) => i.rank)).toEqual(
+      Array.from({ length: 9 }, (_, i) => i + 1),
     );
-    expect(traceOf(result, 'small-after').eligibleRank).toBe(8);
   });
 
-  it('includes an item that fills the budget exactly and stops at the next', async () => {
+  it('includes an item that reaches exactly 10000 and skips one that would reach 10001', async () => {
     const result = await assemble(
       [
         memorySource('episodes', 'episode_history', [
-          ...Array.from({ length: 6 }, (_, i) =>
-            evidence(`big-${i}`, `Budget ${codePoints(1593, 'x')}`, {
-              signals: ranked(i),
-            }),
-          ),
-          evidence('fill', `Budget ${codePoints(393, 'y')}`, {
-            signals: ranked(10),
-          }),
-          evidence('one-more', 'Budget', { signals: ranked(11) }),
+          ...bigs(6),
+          sized('to-9994', 394, 10),
+          sized('would-10001', 7, 11),
+          sized('reaches-10000', 6, 12),
         ]),
       ],
       request('Budget review'),
     );
+    expect(traceOf(result, 'would-10001').exclusionReason).toBe(
+      'context_budget',
+    );
+    expect(selectedIds(result)).toContain('reaches-10000');
     expect(result.bundle.budget.usedChars).toBe(10000);
-    expect(selectedIds(result)).toContain('fill');
-    expect(traceOf(result, 'one-more').exclusionReason).toBe('context_budget');
+  });
+
+  it('stops at 9999 when nothing else fits', async () => {
+    const result = await assemble(
+      [
+        memorySource('episodes', 'episode_history', [
+          ...bigs(6),
+          sized('to-9993', 393, 10),
+          sized('reaches-9999', 6, 11),
+          sized('would-10005', 6, 12),
+        ]),
+      ],
+      request('Budget review'),
+    );
+    expect(result.bundle.budget.usedChars).toBe(9999);
+    expect(traceOf(result, 'would-10005').exclusionReason).toBe(
+      'context_budget',
+    );
   });
 
   it('selects at most 10 items (X)', async () => {
@@ -172,7 +203,7 @@ describe('AVEN-008 budgets and truncation (code-point semantics)', () => {
       request('Budget review'),
     );
     expect(result.bundle.items).toHaveLength(10);
-    expect(result.bundle.budget.stopReason).toBe('item_limit');
+    expect(result.bundle.budget.itemLimitExclusions).toBe(2);
     expect(
       result.trace.candidates
         .filter((c) => c.exclusionReason === 'item_limit')

@@ -84,14 +84,18 @@ const RULES: Record<string, RegExp[]> = {
   ],
   'file, network, process or environment capability (AF)': [
     /\bnode:|readFile|writeFile|appendFile|createReadStream|\bfs\./,
-    /\bfetch\s*\(|\bhttps?\.|WebSocket|XMLHttpRequest|\bnet\.|\btls\./,
+    // Any mention of fetch (direct, destructured or aliased), and quoted
+    // network/process module names however they are imported.
+    /\bfetch\b|\bhttps?\.|WebSocket|XMLHttpRequest|\bnet\.|\btls\./,
+    /['"`](node:)?(https?|http2|net|tls|dns|dgram|child_process|worker_threads|fs)(\/[\w/]*)?['"`]/,
     /child_process|\bspawn\s*\(|\bexec(File|Sync)?\s*\(|worker_threads/,
-    /process\.env|process\.binding|globalThis\s*\[/,
+    /process\.env|process\.binding|\bglobalThis\b/,
     /\beval\s*\(|new\s+Function\s*\(/,
     /localStorage|indexedDB/,
   ],
-  'wall clock, timers or randomness': [
-    /Date\.now|new\s+Date\b|performance\.now|Math\.random|\bcrypto\b|randomUUID|setTimeout|setInterval/,
+  // Timers are checked per file below: only deadline.ts may use them.
+  'wall clock or randomness': [
+    /Date\.now|new\s+Date\b|performance\.now|Math\.random|\bcrypto\b|randomUUID|hrtime/,
   ],
   'authority, approval, Root or tools': [
     /\b(ALLOW|DENY|REQUIRE_OWNER_APPROVAL)\b/,
@@ -133,16 +137,20 @@ const KNOWN_BAD: Record<string, string[]> = {
     `client.chat.completions.create(x)`,
   ],
   'file, network, process or environment capability (AF)': [
+    `const { fetch: get } = globalThis;`,
+    `const request = fetch;`,
+    `const transport = 'node:https';`,
+    `export { request } from "http";`,
     `import { readFileSync } from 'node:fs';`,
     `await fetch('https://api.example.invalid')`,
     `const key = process.env.PROVIDER_KEY;`,
     `globalThis['fet' + 'ch']('x')`,
   ],
-  'wall clock, timers or randomness': [
+  'wall clock or randomness': [
     `const age = Date.now() - recordedAt;`,
     `const now = new Date();`,
     `const jitter = Math.random();`,
-    `setTimeout(done, 10)`,
+    `const t = process.hrtime();`,
   ],
   'authority, approval, Root or tools': [
     `return { decision: 'ALLOW' };`,
@@ -200,6 +208,24 @@ describe('AVEN-008 Context Broker static regression tripwires (not runtime secur
         expect(violations(rule, bad), bad).not.toEqual([]);
     });
 
+  it('confines timers to the collection deadline, which no ranking module imports (H1)', () => {
+    const TIMERS = /\bset(Timeout|Interval|Immediate)\b|\bclearTimeout\b/;
+    const withTimers = Object.keys(source).filter((f) =>
+      TIMERS.test(source[f]!),
+    );
+    expect(withTimers).toEqual(['deadline.ts']);
+    // The deadline module reads no clock value and no randomness.
+    expect(
+      violations('wall clock or randomness', source['deadline.ts']!),
+    ).toEqual([]);
+    const importers = Object.keys(source).filter((f) =>
+      /from\s+['"]\.\/deadline\.ts['"]/.test(source[f]!),
+    );
+    expect(importers).toEqual(['broker.ts']);
+    for (const bad of [`setTimeout(rank, 1)`, `const id = setInterval(f, 5);`])
+      expect(TIMERS.test(bad), bad).toBe(true);
+  });
+
   it('declares only the production entry and depends only on contracts and zod', () => {
     const manifest = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
@@ -221,6 +247,7 @@ describe('AVEN-008 Context Broker static regression tripwires (not runtime secur
       [
         'broker.ts',
         'config.ts',
+        'deadline.ts',
         'errors.ts',
         'index.ts',
         'ranking.ts',
@@ -235,7 +262,7 @@ describe('AVEN-008 Context Broker static regression tripwires (not runtime secur
   it('exports a pinned public surface with no Owner Model, correction or authority API', () => {
     expect(Object.keys(publicApi).sort()).toEqual(
       [
-        'CONTEXT_BROKER_CONFIG_V1',
+        'CONTEXT_BROKER_CONFIG_V2',
         'CONTEXT_BROKER_CONFIG_VERSION',
         'CONTEXT_BROKER_ERROR_CODES',
         'CONTEXT_BROKER_VERSION',
@@ -248,6 +275,8 @@ describe('AVEN-008 Context Broker static regression tripwires (not runtime secur
         'FRESHNESS_HALF_LIFE_DAYS',
         'LocalIdSchema',
         'MAX_CANDIDATES_PER_SOURCE',
+        'MAX_RAW_ITEMS_PER_SOURCE',
+        'MAX_RAW_ITEMS_TOTAL',
         'MAX_SELECTED_CONTEXT_CHARS',
         'MAX_SELECTED_ITEMS',
         'MAX_SINGLE_CONTEXT_ITEM_CHARS',
@@ -259,8 +288,11 @@ describe('AVEN-008 Context Broker static regression tripwires (not runtime secur
         'RANKING_WEIGHTS_BASIS_POINTS',
         'RELEVANCE_VERSION',
         'SCOPE_FACTORS',
+        'SCOPE_VERSION',
+        'SOURCE_COLLECTION_DEADLINE_MS',
         'STOPWORDS_V1',
         'TOKENIZER_VERSION',
+        'TRACE_VERSION',
         'TRUST_FACTORS',
         'TaskDescriptorSchema',
         'createContextBroker',

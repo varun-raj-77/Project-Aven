@@ -13,7 +13,7 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-005 | Chat/session API                                      | Frozen at `aven-005`; loopback sessions, tasks, owner messages via Ledger, history; no model           |
 | AVEN-006 | Model/runtime abstraction                             | Frozen at `aven-006`; replaceable runtime boundary, `model_inference` output; no live provider         |
 | AVEN-007 | Naive Personalized baseline and prebuilt eval dataset | Frozen at `aven-007`; A/B baselines, dataset v2 (48 dev / 16 held-out); `not_run`                      |
-| AVEN-008 | Context Broker                                        | Candidate branch, external review pending; owner-scoped, budgeted, traced; consumes negative signals   |
+| AVEN-008 | Context Broker                                        | Candidate branch; review fixes applied (config v2); final external verification pending                |
 | AVEN-009 | Typed Owner Model                                     | Pending; provenance, lifecycle, and rebuildable state; Owner Model rebuild tests over Ledger replay    |
 | AVEN-010 | Correction events and immediate session override      | Pending; linked correction, immediate effect, durable candidate separation                             |
 | AVEN-011 | Action Proposal schema                                | Pending; typed request distinct from permission                                                        |
