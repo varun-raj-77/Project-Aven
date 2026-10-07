@@ -575,6 +575,17 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     );
   });
 
+  it('keeps the committed regression suites, including the fresh-process pre-import test', () => {
+    const tests = readdirSync(new URL('./', import.meta.url)).filter((f) =>
+      f.endsWith('.test.ts'),
+    );
+    expect(tests.sort()).toEqual([
+      'boundaries.test.ts',
+      'fresh-process.test.ts',
+      'intake.test.ts',
+    ]);
+  });
+
   it('confines JSON.stringify to the own-data canonical serializer', () => {
     const users = Object.keys(source).filter((f) =>
       /JSON\s*\.\s*stringify/.test(source[f]!),

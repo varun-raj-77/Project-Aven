@@ -5,7 +5,7 @@ import {
   type DurableOwnerState,
   type OwnerId,
 } from '@aven/contracts';
-import { ambientPrototypesAreStandard } from './ambient.ts';
+import { ambientIntact, sealAmbient, type AmbientSeal } from './ambient.ts';
 import { canonicalText, compareCodeUnits } from './canonical-text.ts';
 import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
 
@@ -78,8 +78,12 @@ import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
  * inherited `domain` value or `lifecycle` getter made invalid records pass).
  * Before reading anything, intake therefore requires Object.prototype and
  * Array.prototype to match an explicit, pinned standard baseline (see
- * ambient.ts), inspecting descriptors only. Any deviation fails closed with
- * `invalid_input`, even for otherwise-valid records: in a polluted realm
+ * ambient.ts), inspecting descriptors only and probing each standard
+ * method's behavior. The verified state is then sealed for this call, and
+ * because caller-supplied Proxies can run code during intake's reflective
+ * reads, the seal is re-checked after every such read and immediately before
+ * every frozen-schema validation (see `Observe`). Any deviation fails closed
+ * with `invalid_input`, even for otherwise-valid records: in a polluted realm
  * integrity takes precedence over availability.
  *
  * Nested owner identity: the frozen contracts carry an owner ID only in
@@ -163,6 +167,22 @@ function guarded<T>(read: () => T): T {
   }
 }
 
+/**
+ * Caller-controlled reflection (H1). Every reflective operation on a value
+ * the caller supplied (the request, the records array, each record and each
+ * nested object or array) may run caller JavaScript through a Proxy trap:
+ * Reflect.getPrototypeOf, Reflect.ownKeys, Reflect.getOwnPropertyDescriptor
+ * and Array.isArray. `Observe` runs one such operation and then, BEFORE its
+ * result is used, re-establishes ambient integrity against this call's seal
+ * (see ambient.ts); any change fails closed with REJECT. Only then is the
+ * returned prototype, key list or descriptor trusted enough to inspect.
+ * Operations on intake's own null-prototype copies, the seal and the
+ * frozen schema's verdict involve no caller code and are not observed;
+ * mandatory checkpoints also run immediately before every frozen-schema
+ * validation and before identity checks, ordering and output construction.
+ */
+type Observe = <T>(read: () => T) => T;
+
 type OwnData =
   { readonly found: false } | { readonly found: true; value: unknown };
 const MISSING: OwnData = Object.freeze({ found: false });
@@ -172,8 +192,10 @@ const MISSING: OwnData = Object.freeze({ found: false });
  * closed (its getter is never invoked); an absent or inherited property is
  * MISSING. Must be called inside `guarded`.
  */
-function ownData(target: object, key: string): OwnData {
-  const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+function ownData(target: object, key: string, observe: Observe): OwnData {
+  const descriptor = observe(() =>
+    Reflect.getOwnPropertyDescriptor(target, key),
+  );
   if (descriptor === undefined) return MISSING;
   if (!Object.hasOwn(descriptor, 'value')) throw REJECT;
   return { found: true, value: descriptor.value };
@@ -204,7 +226,12 @@ function append<T>(array: T[], value: T): void {
 }
 
 /** Plain-data copy of one record; must be called inside `guarded`. */
-function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
+function snapshot(
+  value: unknown,
+  depth: number,
+  ancestors: object[],
+  observe: Observe,
+): unknown {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -215,19 +242,19 @@ function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
     return value;
   if (!isObject(value)) throw REJECT;
   if (depth > MAX_SNAPSHOT_DEPTH || ancestors.includes(value)) throw REJECT;
-  const isArray = Array.isArray(value);
-  const prototype = Reflect.getPrototypeOf(value);
+  const isArray = observe(() => Array.isArray(value));
+  const prototype = observe(() => Reflect.getPrototypeOf(value));
   if (
     isArray
       ? prototype !== Array.prototype
       : prototype !== Object.prototype && prototype !== null
   )
     throw REJECT;
-  const keys = Reflect.ownKeys(value);
+  const keys = observe(() => Reflect.ownKeys(value));
   append(ancestors, value);
   try {
     if (isArray) {
-      const length = ownData(value, 'length');
+      const length = ownData(value, 'length', observe);
       if (
         !length.found ||
         typeof length.value !== 'number' ||
@@ -239,14 +266,24 @@ function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
       for (let i = 0; i < length.value; i += 1)
         append(
           copy,
-          snapshot(enumerableData(value, String(i)), depth + 1, ancestors),
+          snapshot(
+            enumerableData(value, String(i), observe),
+            depth + 1,
+            ancestors,
+            observe,
+          ),
         );
       return copy;
     }
     const copy = dictionary();
     for (const key of keys) {
       if (typeof key !== 'string' || key === '__proto__') throw REJECT;
-      copy[key] = snapshot(enumerableData(value, key), depth + 1, ancestors);
+      copy[key] = snapshot(
+        enumerableData(value, key, observe),
+        depth + 1,
+        ancestors,
+        observe,
+      );
     }
     return copy;
   } finally {
@@ -255,8 +292,14 @@ function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
 }
 
 /** An own, enumerable data property's value, read once. */
-function enumerableData(target: object, key: string): unknown {
-  const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+function enumerableData(
+  target: object,
+  key: string,
+  observe: Observe,
+): unknown {
+  const descriptor = observe(() =>
+    Reflect.getOwnPropertyDescriptor(target, key),
+  );
   if (
     descriptor === undefined ||
     !Object.hasOwn(descriptor, 'value') ||
@@ -327,30 +370,33 @@ function byIdentity(a: Entry, b: Entry): number {
 }
 
 /** Phase 1: owner binding, raw bound and class A/B/C recognition. */
-function ownedElements(request: unknown): {
+function ownedElements(
+  request: unknown,
+  observe: Observe,
+): {
   ownerId: OwnerId;
   owned: object[];
 } {
   return guarded(() => {
     if (!isObject(request)) throw REJECT;
-    const prototype = Reflect.getPrototypeOf(request);
+    const prototype = observe(() => Reflect.getPrototypeOf(request));
     if (prototype !== Object.prototype && prototype !== null) throw REJECT;
-    const keys = Reflect.ownKeys(request);
+    const keys = observe(() => Reflect.ownKeys(request));
     if (
       keys.length !== 2 ||
       !keys.includes('ownerId') ||
       !keys.includes('records')
     )
       throw REJECT;
-    const requester = ownData(request, 'ownerId');
+    const requester = ownData(request, 'ownerId', observe);
     if (!requester.found || typeof requester.value !== 'string') throw REJECT;
     const parsedOwner = OwnerIdSchema.safeParse(requester.value);
     if (!parsedOwner.success) throw REJECT;
-    const records = ownData(request, 'records');
+    const records = ownData(request, 'records', observe);
     if (!records.found || !isObject(records.value)) throw REJECT;
     const list = records.value;
-    if (!Array.isArray(list)) throw REJECT;
-    const length = ownData(list, 'length');
+    if (!observe(() => Array.isArray(list))) throw REJECT;
+    const length = ownData(list, 'length', observe);
     if (
       !length.found ||
       typeof length.value !== 'number' ||
@@ -361,9 +407,9 @@ function ownedElements(request: unknown): {
       throw REJECT;
     const owned: object[] = [];
     for (let i = 0; i < length.value; i += 1) {
-      const element = ownData(list, String(i));
+      const element = ownData(list, String(i), observe);
       if (!element.found || !isObject(element.value)) throw REJECT;
-      const owner = ownData(element.value, 'ownerId');
+      const owner = ownData(element.value, 'ownerId', observe);
       if (!owner.found || typeof owner.value !== 'string') throw REJECT;
       if (owner.value === parsedOwner.data) append(owned, element.value);
       else if (!OwnerIdSchema.safeParse(owner.value).success) throw REJECT;
@@ -377,10 +423,18 @@ function ownedElements(request: unknown): {
  * Phase 2: own-data snapshot, strict frozen-contract verdict, canonical copy
  * of the SNAPSHOT (the schema's output objects are never read).
  */
-function validated(ownerId: OwnerId, element: object): Entry {
-  const plain = guarded(() => snapshot(element, 0, []));
+function validated(
+  ownerId: OwnerId,
+  element: object,
+  observe: Observe,
+  checkpoint: () => void,
+): Entry {
+  const plain = guarded(() => snapshot(element, 0, [], observe));
   if (!isObject(plain) || (plain as { ownerId?: unknown }).ownerId !== ownerId)
     throw REJECT;
+  // Mandatory pre-schema checkpoint: the frozen schema never runs, and no
+  // snapshot data is used, unless the ambient seal still holds.
+  checkpoint();
   const valid = guarded(
     () => OwnerStateSchema.safeParse(plain).success === true,
   );
@@ -441,11 +495,26 @@ function distinct(entries: Entry[]): Entry[] {
  */
 export function intakeOwnerState(request: unknown): OwnerStateIntake {
   try {
-    if (!guarded(ambientPrototypesAreStandard)) throw REJECT;
-    const { ownerId, owned } = ownedElements(request);
+    // Full verification and this call's seal, before anything is read.
+    const seal: AmbientSeal | undefined = guarded(sealAmbient);
+    if (seal === undefined) throw REJECT;
+    const checkpoint = (): void => {
+      if (!guarded(() => ambientIntact(seal))) throw REJECT;
+    };
+    const observe: Observe = (read) => {
+      const result = guarded(read);
+      checkpoint();
+      return result;
+    };
+    const { ownerId, owned } = ownedElements(request, observe);
     const entries: Entry[] = [];
-    for (const element of owned) append(entries, validated(ownerId, element));
+    for (const element of owned)
+      append(entries, validated(ownerId, element, observe, checkpoint));
+    // No caller code runs after the last snapshot; these checkpoints are
+    // defense in depth before identity, ordering and output construction.
+    checkpoint();
     const kept = distinct(entries);
+    checkpoint();
     const durable: DurableOwnerState[] = [];
     const activeTasks: ActiveTaskState[] = [];
     for (const { record } of kept)
