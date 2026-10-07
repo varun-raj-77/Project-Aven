@@ -1,16 +1,16 @@
 # AVEN-008 report: Context Broker
 
 Status: **implemented on an isolated candidate branch; independent review
-corrections applied (configuration v2, section 28); not merged; not tagged;
-awaiting final external verification.** Validation ran in a Linux cloud
-container (sections 22 and 28.15). Windows validation is pending. No model was
-called. Nothing in this report is an experimental result, and no C-versus-B
-claim is made.
+corrections applied (configuration v2, section 28; final H3 correction, section
+29); not merged; not tagged; awaiting final external verification.** Validation
+ran in a Linux cloud container (sections 22 and 28.15). Windows validation is
+pending. No model was called. Nothing in this report is an experimental result,
+and no C-versus-B claim is made.
 
 Sections 1 to 27 are the unchanged record of the reviewed first candidate
 (configuration v1, commit `630369a`). Section 28 records the review
-reconciliation (configuration v2). Where the two differ, section 28 supersedes
-sections 1 to 27.
+reconciliation (configuration v2), and section 29 the final-verification H3
+correction. Where they differ, later sections supersede earlier ones.
 
 ## 1. Purpose
 
@@ -978,8 +978,10 @@ Tests:
   factor tables, `SOURCE_KIND_REFERENCE_KINDS` (including its nested arrays),
   `EXCLUSION_REASONS`, `CONTEXT_BROKER_ERROR_CODES`, the word lists and the
   whole `CONTEXT_BROKER_CONFIG_V2`, recursively.
-- The broker validates with private schema instances. Replacing a method on an
-  exported schema object therefore cannot change broker behaviour (tested).
+- The broker validates with private root schema instances. Replacing a method on
+  an exported root schema object therefore does not change broker behaviour
+  (tested). This does not isolate nested schemas (see the limitation below and
+  29.4).
 - Tests perform real mutation attempts on exported and nested collections:
   `push`, `splice`, index assignment and nested assignment. Each throws
   `TypeError`, and a later broker call is byte-identical.
@@ -1162,3 +1164,106 @@ AVEN-009 and AVEN-010 were not started: no owner-model persistence, lifecycle
 mutation, promotion, correction interpretation, session override, or negative-
 or supersession-signal generation. `main` and the tags were not changed, and no
 `aven-008` tag exists.
+
+## 29. Final-verification correction: public error locations (H3)
+
+### 29.1 Finding
+
+Codex final verification of `9373f2a`: **FIXES REQUIRED**, with one blocking
+finding; everything else passed. Public `ContextBrokerError.candidateIndex`
+exposed the raw source-array offset. An invalid owner candidate reported index
+`0` when alone and `499` when preceded by 499 recognizable foreign-owner
+records, so the public failure surface leaked foreign-record existence and
+count. A throwing getter after foreign padding had the same problem. There was
+also one LOW wording issue (29.4).
+
+### 29.2 Public error-location policy
+
+- **Raw offsets are never public.** The broker uses the raw array position only
+  internally, to read the element.
+- **Before ownership is established**, failures carry only `sourceId` and no
+  `candidateIndex`. These are: an unreadable element (for example a throwing
+  array proxy), a throwing or unreadable `ownerId`, and an item whose owner is
+  unrecognizable (missing or malformed `ownerId`, a non-object or a hole).
+- **After foreign filtering**, a record whose `ownerId` reads as the requesting
+  owner gets an **owner-local, zero-based position**. It is counted over that
+  source's requester-owned records only; foreign records and unrecognizable
+  items never shift it. This is the only `candidateIndex` a public error may
+  carry. It is used for snapshot (getter) failures, schema and score-metadata
+  failures, source-kind and owner inconsistencies, and duplicate IDs within a
+  source.
+- Source-, timeout-, resource-limit-, quota- and duplicate-group-level errors
+  carry at most `sourceId`, as before.
+- Every `ContextBrokerError` construction and every location assignment in the
+  broker was audited. Both the early array/owner-read path and the later
+  snapshot/schema-validation path were changed.
+- Unchanged: the fixed code and message, no `cause`, safe serialization, no
+  foreign ID, text or count, and no secret.
+
+There is no separate error-schema version identifier, so no global version was
+invented. This is a pre-freeze H3 correction to the error surface of
+configuration v2. Ranking, scope, deduplication, budget, timeout and trace
+behaviour are unchanged, and nothing was retuned.
+
+### 29.3 Foreign-padding regressions
+
+Each test compares the full serialized public error and its `code`, `sourceId`,
+`candidateIndex` and `message`. Each case produces an identical error with and
+without foreign padding.
+
+| Case                                                                                | Result                                                                                         |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Invalid owner candidate, alone vs after 499 foreign records                         | `candidateIndex` 0 in both                                                                     |
+| Throwing `ownerId` getter, alone vs after 37 foreign records                        | no `candidateIndex` in either; "37" never serialized                                           |
+| Hole and throwing proxy, alone vs after 12 foreign records                          | no `candidateIndex`                                                                            |
+| Throwing array-element read (array proxy), alone vs 9 foreign before                | no `candidateIndex`                                                                            |
+| Malformed but recognizable foreign records around an invalid owner record           | identical to alone (`candidateIndex` 0)                                                        |
+| Owner valid + owner invalid, with 0/50/499 foreign records before, between or split | invalid record stays at `candidateIndex` 1                                                     |
+| Invalid score metadata or a throwing owner getter, alone vs padded                  | owner-local `candidateIndex` 0                                                                 |
+| Serialized error after 499 foreign records                                          | keys exactly `name`, `code`, `sourceId`, `candidateIndex`; no foreign ID, owner, count or text |
+
+Mutation check (the same harness as 28.14, rerun on the final source): 37 of 37
+mutations caught by assertions, with no load or infrastructure failure, and
+every file restored byte-identically. That is the 33 from section 28 (anchors
+updated only for the renamed loop variable) plus 4 new ones:
+
+- H3a: a raw offset used as the public index;
+- H3b: a raw offset exposed on an `ownerId` read failure;
+- H3c: an unrecognizable owner given a public index;
+- H3d: a raw offset exposed on an element read failure.
+
+H3d initially survived. The array-proxy element-read test was added to close it,
+and the mutation is now caught.
+
+### 29.4 LOW: schema-isolation wording
+
+The source comment in `types.ts` and section 28.10 overstated isolation. They
+now say precisely that:
+
+- replacing a method or property on an **exported root** schema does not affect
+  the broker, which validates with private root instances;
+- the frozen AVEN-002 schemas composed inside both (`ContextSourceSchema`,
+  `ProvenanceSchema`, `ScopeSchema`, `OwnerIdSchema`, ...) are **shared,
+  mutable** objects from `@aven/contracts`, and trusted in-process code that
+  mutates them can change broker validation.
+
+This remains a documented limitation. The frozen contracts were not modified,
+and no runtime isolation of trusted dependency code is attempted.
+
+### 29.5 Validation
+
+There are 681 tests in total: the 544 frozen AVEN-001 to AVEN-007 tests plus 137
+AVEN-008 tests (133 context-broker and 4 frozen-layer). Every command in section
+22 exited 0 in the same Linux cloud environment (Node 24.21.0, pnpm 11.19.0),
+and `git diff --check` was clean. The AVEN-007 dataset is still `not_run`.
+**Windows validation is pending.** Expected result: 681 tests passing.
+
+Changed files:
+
+- `packages/context-broker/src/broker.ts` and `errors.ts`;
+- `packages/context-broker/src/types.ts` (comment only);
+- `packages/context-broker/test/isolation.test.ts` and `reconciliation.test.ts`;
+- this report and the package README.
+
+All frozen layers are unchanged, and the aven-008 frozen-layer tripwire passes.
+AVEN-009 and AVEN-010 were not started. `main` and the tags are untouched.

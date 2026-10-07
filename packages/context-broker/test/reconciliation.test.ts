@@ -689,3 +689,173 @@ describe('M6 sanitized typed errors for malformed source data', () => {
     expect(fromGetter).not.toBe(spoof);
   });
 });
+
+describe('H3 final: public error locations never reflect foreign records', () => {
+  const foreign = (n: number, prefix = 'f') =>
+    Array.from({ length: n }, (_, i) =>
+      evidence(`${prefix}${i}`, 'Foreign synthetic record', {
+        ownerId: OTHER_OWNER,
+        provenance: PROVENANCE.ownerStatement(`${prefix}${i}`, OTHER_OWNER),
+      }),
+    );
+  // Recognizably foreign by owner, otherwise malformed (still just dropped).
+  const malformedForeign = (n: number) =>
+    Array.from({ length: n }, () => ({
+      ownerId: OTHER_OWNER,
+      text: 42,
+      get signals(): never {
+        throw new Error(SECRET);
+      },
+    }));
+  const invalidOwn = () => ({
+    ...evidence('bad-own', 'Budget review notes'),
+    unexpected: true,
+  });
+  const throwingOwner = () => ({
+    get ownerId(): string {
+      throw new Error(SECRET);
+    },
+  });
+  const publicError = async (collection: readonly unknown[]) => {
+    const error = await failure(() =>
+      assemble(
+        [memorySource('source', 'episode_history', collection)],
+        request('Budget review'),
+      ),
+    );
+    expectSanitized(error, error.code);
+    return {
+      json: JSON.stringify(error),
+      code: error.code,
+      sourceId: error.sourceId,
+      candidateIndex: error.candidateIndex,
+      message: error.message,
+    };
+  };
+
+  it('keeps an invalid owner candidate at owner-local index 0 with 0 or 499 foreign records before it', async () => {
+    const alone = await publicError([invalidOwn()]);
+    const padded = await publicError([...foreign(499), invalidOwn()]);
+    expect(alone.candidateIndex).toBe(0);
+    expect(padded).toEqual(alone);
+    expect(padded.json).not.toContain('499');
+  });
+
+  it('omits the index when ownership cannot be read, with or without 37 foreign records', async () => {
+    const alone = await publicError([throwingOwner()]);
+    const padded = await publicError([...foreign(37), throwingOwner()]);
+    expect(alone.code).toBe('invalid_candidate');
+    expect(alone.candidateIndex).toBeUndefined();
+    expect(padded).toEqual(alone);
+    expect(padded.json).not.toContain('37');
+  });
+
+  it('omits the index for early unreadable elements (hole, throwing proxy)', async () => {
+    const throwingProxy = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error(SECRET);
+        },
+      },
+    );
+    for (const element of [undefined, throwingProxy]) {
+      const alone = await publicError([element]);
+      const padded = await publicError([...foreign(12), element]);
+      expect(alone.candidateIndex).toBeUndefined();
+      expect(padded).toEqual(alone);
+    }
+  });
+
+  it('omits the index when reading the array element itself throws (array proxy)', async () => {
+    const trapLast = (items: unknown[]) =>
+      new Proxy([...items, null], {
+        get(target, key, receiver) {
+          if (key === String(items.length)) throw new Error(SECRET);
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      });
+    const alone = await publicError(trapLast([]));
+    const padded = await publicError(trapLast(foreign(9)));
+    expect(alone.code).toBe('invalid_candidate');
+    expect(alone.candidateIndex).toBeUndefined();
+    expect(padded).toEqual(alone);
+    expect(padded.json).not.toContain('9');
+  });
+
+  it('is unaffected by malformed but recognizable foreign records', async () => {
+    const alone = await publicError([invalidOwn()]);
+    const padded = await publicError([
+      ...malformedForeign(20),
+      invalidOwn(),
+      ...malformedForeign(5),
+    ]);
+    expect(padded).toEqual(alone);
+  });
+
+  it('keeps an owner-local index stable when foreign records are inserted before or between owner records', async () => {
+    const valid = evidence('good-own', 'Budget review notes');
+    const baseline = await publicError([valid, invalidOwn()]);
+    expect(baseline.candidateIndex).toBe(1);
+    for (const n of [0, 50, 499]) {
+      const before = await publicError([
+        ...foreign(n, 'a'),
+        valid,
+        invalidOwn(),
+      ]);
+      const between = await publicError([
+        valid,
+        ...foreign(n, 'b'),
+        invalidOwn(),
+      ]);
+      const both = await publicError([
+        ...foreign(Math.floor(n / 2), 'c'),
+        valid,
+        ...foreign(Math.ceil(n / 2), 'd'),
+        invalidOwn(),
+      ]);
+      for (const result of [before, between, both])
+        expect(result, String(n)).toEqual(baseline);
+    }
+  });
+
+  it('uses the owner-local index for post-filter schema and score-metadata failures', async () => {
+    const badSignals = evidence('bad-signals', 'Budget review notes', {
+      signals: { confidence: Number.NaN, salience: 0.5, negativeRetrieval: 0 },
+    });
+    const alone = await publicError([badSignals]);
+    const padded = await publicError([...foreign(30), badSignals]);
+    expect(alone).toMatchObject({
+      code: 'invalid_score_metadata',
+      candidateIndex: 0,
+    });
+    expect(padded).toEqual(alone);
+    // A throwing getter on an OWNER record (ownership read succeeded) fails
+    // in the snapshot step and also reports only its owner-local index.
+    const ownWithGetter = {
+      ...evidence('getter-own', 'Budget'),
+      get text(): string {
+        throw new Error(SECRET);
+      },
+    };
+    const getterAlone = await publicError([ownWithGetter]);
+    const getterPadded = await publicError([...foreign(44), ownWithGetter]);
+    expect(getterAlone).toMatchObject({
+      code: 'invalid_candidate',
+      candidateIndex: 0,
+    });
+    expect(getterPadded).toEqual(getterAlone);
+  });
+
+  it('serializes no foreign ID, owner, count or total in any public error', async () => {
+    const padded = await publicError([...foreign(499), invalidOwn()]);
+    for (const leak of [OTHER_OWNER, 'f498', '499', '500', 'Foreign synthetic'])
+      expect(padded.json).not.toContain(leak);
+    expect(Object.keys(JSON.parse(padded.json)).sort()).toEqual([
+      'candidateIndex',
+      'code',
+      'name',
+      'sourceId',
+    ]);
+  });
+});

@@ -20,10 +20,14 @@ import { codePointLength } from './util.ts';
 
 /*
  * Every schema is built by a function. The broker validates with its own
- * private instances (`INTERNAL`), and the package exports separate instances,
- * so mutating an exported schema object cannot change broker behavior. The
- * frozen AVEN-002 schemas these compose are shared objects from
- * `@aven/contracts`; that package is frozen and was not changed.
+ * private root instances (`INTERNAL`), and the package exports separate root
+ * instances, so replacing a method or property on an EXPORTED ROOT schema does
+ * not affect the broker. This is not isolation of nested schemas: the frozen
+ * AVEN-002 schemas composed inside both (`ContextSourceSchema`,
+ * `ProvenanceSchema`, `ScopeSchema`, `OwnerIdSchema`, ...) are shared,
+ * mutable objects from `@aven/contracts`, and trusted in-process code that
+ * mutates them can change broker validation. That package is frozen and was
+ * not changed; no runtime isolation of trusted dependency code is attempted.
  */
 
 const boundedText = (max: number) =>

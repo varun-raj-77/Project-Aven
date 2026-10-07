@@ -5,8 +5,14 @@
  * candidate content, validation detail and thrown adapter values never cross
  * this boundary: v2 keeps NO `cause` (v1 kept validation issues and source
  * errors there, which could carry secrets). `sourceId` (a caller-registered
- * identifier) and `candidateIndex` locate the failing input without exposing
- * it; they are owner-local locations, not guaranteed secret-free.
+ * identifier) locates the failing source; it is not guaranteed secret-free.
+ *
+ * `candidateIndex`, when present, is an OWNER-LOCAL zero-based position: the
+ * failing record's position among the source's records whose `ownerId` read
+ * as the requesting owner. It is never a raw source-array offset, which other
+ * owners' records could shift (review H3). It is omitted when ownership could
+ * not be established (unreadable element or `ownerId`, unrecognizable owner)
+ * and for source-, quota- and duplicate-level failures.
  *
  * Owner isolation is not an error: recognizable foreign records are dropped
  * before validation and leave no count or trace (see `broker.ts`).

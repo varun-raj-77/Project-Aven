@@ -446,15 +446,22 @@ async function collectAll(
   // 3. Drop RECOGNIZABLE foreign records first: an object whose `ownerId` is
   //    a well-formed owner ID other than the requester's. Nothing else of
   //    theirs is read, validated, counted, deduplicated or traced.
+  //
+  //    Public error locations (H3 final correction): a raw source-array offset
+  //    can be shifted by foreign records, so it is NEVER exposed. Failures
+  //    before ownership is established (unreadable element or `ownerId`)
+  //    carry only `sourceId`. Items whose `ownerId` reads as the requester's
+  //    get an OWNER-LOCAL, zero-based position counted over those items only;
+  //    that is the only `candidateIndex` a public error may carry.
   const owned = collections.map(({ value, length }, i) => {
     const sourceId = sources[i]!.sourceId;
-    const items: { index: number; item: unknown }[] = [];
-    for (let index = 0; index < length; index += 1) {
-      const location = { sourceId, candidateIndex: index };
+    const items: { item: unknown; ownerIndex: number | undefined }[] = [];
+    let ownerPosition = 0;
+    for (let rawIndex = 0; rawIndex < length; rawIndex += 1) {
       const item = guard(
-        () => value[index] as unknown,
+        () => value[rawIndex] as unknown,
         'invalid_candidate',
-        location,
+        { sourceId },
       );
       const owner = guard(
         () =>
@@ -462,13 +469,17 @@ async function collectAll(
             ? (Reflect.get(item, 'ownerId') as unknown)
             : undefined,
         'invalid_candidate',
-        location,
+        { sourceId },
       );
       const foreign =
         typeof owner === 'string' &&
         owner !== query.ownerId &&
         INTERNAL.ownerId.safeParse(owner).success;
-      if (!foreign) items.push({ index, item });
+      if (foreign) continue;
+      // Unrecognizable owner (missing, malformed): kept so it fails closed
+      // below, but without any public position.
+      const ownerIndex = owner === query.ownerId ? ownerPosition++ : undefined;
+      items.push({ item, ownerIndex });
     }
     return items;
   });
@@ -488,8 +499,11 @@ async function collectAll(
   // 5. Validation of a plain-data snapshot (getters run once, inside guard).
   return sources.map((source, i) => {
     const seen = new Set<string>();
-    const candidates = owned[i]!.map(({ index, item }) => {
-      const location = { sourceId: source.sourceId, candidateIndex: index };
+    const candidates = owned[i]!.map(({ item, ownerIndex }) => {
+      const location =
+        ownerIndex === undefined
+          ? { sourceId: source.sourceId }
+          : { sourceId: source.sourceId, candidateIndex: ownerIndex };
       const snapshot = guard(
         () => structuredClone(item),
         'invalid_candidate',
