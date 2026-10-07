@@ -13,8 +13,8 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-005 | Chat/session API                                      | Frozen at `aven-005`; loopback sessions, tasks, owner messages via Ledger, history; no model           |
 | AVEN-006 | Model/runtime abstraction                             | Frozen at `aven-006`; replaceable runtime boundary, `model_inference` output; no live provider         |
 | AVEN-007 | Naive Personalized baseline and prebuilt eval dataset | Frozen at `aven-007`; A/B baselines, dataset v2 (48 dev / 16 held-out); `not_run`                      |
-| AVEN-008 | Context Broker                                        | Candidate branch; review fixes applied (config v2); final external verification pending                |
-| AVEN-009 | Typed Owner Model                                     | Pending; provenance, lifecycle, and rebuildable state; Owner Model rebuild tests over Ledger replay    |
+| AVEN-008 | Context Broker                                        | Frozen at `aven-008`; config v2 after independent review; transient candidates, no persistence         |
+| AVEN-009 | Typed Owner Model                                     | In progress (candidate branch, patch 1 scaffold); typed read model; rebuild tests over Ledger replay   |
 | AVEN-010 | Correction events and immediate session override      | Pending; linked correction, immediate effect, durable candidate separation                             |
 | AVEN-011 | Action Proposal schema                                | Pending; typed request distinct from permission                                                        |
 | AVEN-012 | Root Policy Gateway                                   | Pending; external ALLOW/DENY/REQUIRE_OWNER_APPROVAL                                                    |
@@ -28,12 +28,13 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-020 | Frozen end-to-end A/B/C experiment                    | Pending; untouched final cases, full outcomes and limitations; evaluate before expansion               |
 
 No framework adapter is required; one is optional only when it directly serves
-the experiment. Current authorization stops after AVEN-008, whose commits exist
-only on an isolated candidate branch pending external review (not merged, not
-tagged). Neither AVEN-007 nor AVEN-008 adds a live-model adapter; a later,
-explicitly authorized step may add the first justified adapter behind the
-AVEN-006 interface and execute the frozen A/B baselines. AVEN-008 makes no
-C-versus-B claim.
+the experiment. AVEN-008 is frozen at tag `aven-008` (`4174080`). Current
+authorization covers AVEN-009 only, implemented patch by patch on an isolated
+candidate branch pending external review (not merged, not tagged); AVEN-010 and
+later remain unauthorized. Neither AVEN-007 nor AVEN-008 adds a live-model
+adapter; a later, explicitly authorized step may add the first justified adapter
+behind the AVEN-006 interface and execute the frozen A/B baselines. AVEN-008
+makes no C-versus-B claim.
 
 ## Longer-term gates, all deferred
 
