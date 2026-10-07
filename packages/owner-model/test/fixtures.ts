@@ -140,3 +140,54 @@ export function deeplyFrozen(value: unknown): boolean {
   if (!Object.isFrozen(value)) return false;
   return Object.values(value).every(deeplyFrozen);
 }
+
+/** A durable record whose lifecycle is supplied verbatim (synthetic). */
+export function withLifecycle(
+  options: Parameters<typeof durable>[0],
+  lifecycle: Json,
+): Json {
+  return { ...durable(options), lifecycle };
+}
+
+export function superseded(
+  id: string,
+  replacement: { learnedItemId: string; version: number },
+  assertion: string,
+): Json {
+  const record = withLifecycle(
+    { id },
+    {
+      status: 'superseded',
+      supersededAt: T1,
+      replacement,
+      eventId: `event_sup_${id}`,
+    },
+  );
+  (record['content'] as Json)['assertion'] = assertion;
+  return record;
+}
+
+export function revoked(
+  id: string,
+  fallback: { learnedItemId: string; version: number },
+  assertion: string,
+): Json {
+  const record = withLifecycle(
+    { id },
+    {
+      status: 'revoked',
+      revokedAt: T1,
+      reason: 'Synthetic revocation',
+      eventId: `event_rev_${id}`,
+      fallback,
+    },
+  );
+  (record['content'] as Json)['assertion'] = assertion;
+  return record;
+}
+
+export function observed(id: string, assertion: string): Json {
+  const record = durable({ id });
+  (record['content'] as Json)['assertion'] = assertion;
+  return record;
+}

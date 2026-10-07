@@ -18,9 +18,11 @@ import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
  * supersession), verify lifecycle or promotion claims, judge transitions
  * between versions, read storage or the Ledger, or interpret anything.
  *
- * Request: an ordinary object with exactly two own data properties, `ownerId`
- * (the externally supplied owner binding) and `records` (an array). Records
- * never change the binding.
+ * Request: a plain-data container whose prototype is exactly Object.prototype
+ * or null (read once; a Date, RegExp, Map, Set, array, function, class
+ * instance or any other prototype is rejected even with valid own fields),
+ * with exactly two own data properties, `ownerId` (the externally supplied
+ * owner binding) and `records` (an array). Records never change the binding.
  *
  * Owner recognition reads ONE own data property, `ownerId`, of each element,
  * through its property descriptor: no getter runs, nothing inherited counts,
@@ -55,6 +57,28 @@ import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
  * non-integer or non-positive versions, malformed lifecycle, references or
  * timestamps all fail); nothing is coerced or repaired.
  *
+ * Own-data guarantee (ambient prototype behavior): every dictionary intake
+ * builds, the validation snapshot and the returned records alike, has a NULL
+ * prototype, and arrays are dense with only own elements. So no property
+ * inherited from Object.prototype (or Array.prototype) can satisfy a required
+ * field, supply an optional field, shadow an own field or run a getter when
+ * the frozen schema reads its input or when intake reads, compares, orders or
+ * returns data, even if Object.prototype was polluted before intake started.
+ * The frozen schema is used only for its verdict: the returned records are
+ * built from the validated snapshot, never from the schema's output objects
+ * (the frozen contracts apply no transforms or defaults, so the data is the
+ * same). Duplicate identity uses an own-data serializer that never consults
+ * `toJSON` or any other hook. The frozen Zod schema builds its own output
+ * from ordinary objects by assignment, so an inherited SETTER at a key the
+ * record supplies would run inside it: intake detects any such setter on
+ * Object.prototype or Array.prototype by descriptor (nothing is invoked) and
+ * fails closed with `invalid_input` before validating. Residual, documented
+ * limitation: an inherited getter at a key that the frozen AVEN-002
+ * refinements themselves read on the schema's output (for example
+ * `lifecycle`) can still execute inside that frozen code; any throw there is
+ * caught and reported only as `invalid_input`. Closing that path needs a
+ * frozen-contract or realm-level change, not an AVEN-009 one.
+ *
  * Nested owner identity: the frozen contracts carry an owner ID only in
  * owner-origin provenance (`provenance.ownerId`) and in owner confirmation
  * provenance (`evidence.ownerConfirmation.provenance.ownerId`); the frozen
@@ -79,12 +103,17 @@ import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
  * Version gaps are accepted and no first version is required. Transitions
  * between versions (for example trusted then observed) are not judged here.
  *
+ * Patch 2 never interprets lifecycle: a superseded or revoked record is kept
+ * exactly as supplied, its replacement or fallback reference is neither
+ * followed nor checked, and no record is selected as current.
+ *
  * Canonical output: `durable` and `activeTasks` partitions, each ordered by
  * stable ID (UTF-16 code units) then numeric `recordVersion`. Object keys are
  * in code-unit order and keys whose value is `undefined` are omitted. Every
- * object and array is a fresh copy, frozen; the caller's input is never
- * frozen or retained. The result is a pure function of the requesting owner's
- * record set: foreign records and input order cannot change it.
+ * object (null-prototype) and array is a fresh copy, frozen; the caller's
+ * input is never frozen or retained. The result is a pure function of the
+ * requesting owner's record set: foreign records and input order cannot
+ * change it.
  */
 
 /** Raw resource bound on the caller's array length (all owners). */
@@ -151,6 +180,71 @@ function isObject(value: unknown): value is object {
   return value !== null && typeof value === 'object';
 }
 
+/** A dictionary with no prototype: it can only ever hold own data. */
+function dictionary(): Record<string, unknown> {
+  return Object.create(null) as Record<string, unknown>;
+}
+
+/**
+ * Appends by defining an own data element with a null-prototype descriptor.
+ * Unlike `push` (an ordinary Set, which an inherited index setter could
+ * intercept) or `map`/`slice` (which read an inherited `constructor`), this
+ * never consults a prototype.
+ */
+function append<T>(array: T[], value: T): void {
+  const descriptor = Object.create(null) as PropertyDescriptor;
+  descriptor.value = value;
+  descriptor.writable = true;
+  descriptor.enumerable = true;
+  descriptor.configurable = true;
+  Object.defineProperty(array, array.length, descriptor);
+}
+
+/*
+ * Prototype chains of the ordinary objects and arrays that the frozen schema
+ * builds its own output from (intake never reads that output).
+ */
+const OBJECT_CHAIN: readonly object[] = Object.freeze([Object.prototype]);
+const ARRAY_CHAIN: readonly object[] = Object.freeze([
+  Array.prototype,
+  Object.prototype,
+]);
+
+/** Whether assigning `key` on an object with this chain runs a setter. */
+function inheritedSetter(chain: readonly object[], key: string): boolean {
+  for (const prototype of chain) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(prototype, key);
+    if (descriptor !== undefined)
+      return Object.hasOwn(descriptor, 'set') && descriptor.set !== undefined;
+  }
+  return false;
+}
+
+/**
+ * Whether validating this snapshot would make the frozen schema assign a key
+ * through an inherited setter. Descriptors only: nothing is invoked.
+ */
+function reachesInheritedSetter(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1)
+      if (
+        inheritedSetter(ARRAY_CHAIN, String(i)) ||
+        reachesInheritedSetter(value[i])
+      )
+        return true;
+    return false;
+  }
+  if (!isObject(value)) return false;
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record))
+    if (
+      inheritedSetter(OBJECT_CHAIN, key) ||
+      reachesInheritedSetter(record[key])
+    )
+      return true;
+  return false;
+}
+
 /** Plain-data copy of one record; must be called inside `guarded`. */
 function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
   if (
@@ -172,7 +266,7 @@ function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
   )
     throw REJECT;
   const keys = Reflect.ownKeys(value);
-  ancestors.push(value);
+  append(ancestors, value);
   try {
     if (isArray) {
       const length = ownData(value, 'length');
@@ -185,20 +279,16 @@ function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
         throw REJECT;
       const copy: unknown[] = [];
       for (let i = 0; i < length.value; i += 1)
-        copy.push(
+        append(
+          copy,
           snapshot(enumerableData(value, String(i)), depth + 1, ancestors),
         );
       return copy;
     }
-    const copy: Record<string, unknown> = {};
+    const copy = dictionary();
     for (const key of keys) {
       if (typeof key !== 'string' || key === '__proto__') throw REJECT;
-      Object.defineProperty(copy, key, {
-        value: snapshot(enumerableData(value, key), depth + 1, ancestors),
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      copy[key] = snapshot(enumerableData(value, key), depth + 1, ancestors);
     }
     return copy;
   } finally {
@@ -223,27 +313,58 @@ function compareCodeUnits(a: string, b: string): number {
 }
 
 /**
- * Fresh, frozen copy of validated data: keys in code-unit order, `undefined`
- * values omitted, and any nested `ownerId` required to equal the requester's.
+ * Fresh, frozen copy of validated snapshot data: null-prototype objects with
+ * keys in code-unit order, `undefined` values omitted, and any nested
+ * `ownerId` required to equal the requester's.
  */
 function canonical(value: unknown, ownerId: string): unknown {
-  if (Array.isArray(value))
-    return Object.freeze(value.map((entry) => canonical(entry, ownerId)));
+  if (Array.isArray(value)) {
+    const copy: unknown[] = [];
+    for (let i = 0; i < value.length; i += 1)
+      append(copy, canonical(value[i], ownerId));
+    return Object.freeze(copy);
+  }
   if (!isObject(value)) return value;
   const source = value as Record<string, unknown>;
-  const copy: Record<string, unknown> = {};
+  const copy = dictionary();
   for (const key of Object.keys(source).sort(compareCodeUnits)) {
     const entry = source[key];
     if (entry === undefined) continue;
     if (key === 'ownerId' && entry !== ownerId) throw REJECT;
-    Object.defineProperty(copy, key, {
-      value: canonical(entry, ownerId),
-      enumerable: true,
-      writable: false,
-      configurable: false,
-    });
+    copy[key] = canonical(entry, ownerId);
   }
   return Object.freeze(copy);
+}
+
+/**
+ * Deterministic text of canonical own data, for duplicate identity and order.
+ * It walks own keys and dense indices itself and serializes primitives only,
+ * so no `toJSON` or other inherited hook can take part (a primitive string or
+ * number given to JSON.stringify is never asked for `toJSON`).
+ */
+function canonicalText(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw INTERNAL;
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (Array.isArray(value)) {
+    let text = '[';
+    for (let i = 0; i < value.length; i += 1)
+      text += `${i === 0 ? '' : ','}${canonicalText(value[i])}`;
+    return `${text}]`;
+  }
+  if (!isObject(value)) throw INTERNAL;
+  const record = value as Record<string, unknown>;
+  let text = '{';
+  let first = true;
+  for (const key of Object.keys(record).sort(compareCodeUnits)) {
+    text += `${first ? '' : ','}${JSON.stringify(key)}:${canonicalText(record[key])}`;
+    first = false;
+  }
+  return `${text}}`;
 }
 
 /* Exact instant comparison of frozen AVEN-002 timestamps (no clock). */
@@ -288,7 +409,9 @@ function ownedElements(request: unknown): {
   owned: object[];
 } {
   return guarded(() => {
-    if (!isObject(request) || Array.isArray(request)) throw REJECT;
+    if (!isObject(request)) throw REJECT;
+    const prototype = Reflect.getPrototypeOf(request);
+    if (prototype !== Object.prototype && prototype !== null) throw REJECT;
     const keys = Reflect.ownKeys(request);
     if (
       keys.length !== 2 ||
@@ -319,7 +442,7 @@ function ownedElements(request: unknown): {
       if (!element.found || !isObject(element.value)) throw REJECT;
       const owner = ownData(element.value, 'ownerId');
       if (!owner.found || typeof owner.value !== 'string') throw REJECT;
-      if (owner.value === parsedOwner.data) owned.push(element.value);
+      if (owner.value === parsedOwner.data) append(owned, element.value);
       else if (!OwnerIdSchema.safeParse(owner.value).success) throw REJECT;
       /* else: class A, recognizable foreign, dropped unread. */
     }
@@ -327,14 +450,21 @@ function ownedElements(request: unknown): {
   });
 }
 
-/** Phase 2: snapshot, strict frozen-contract validation, canonical copy. */
+/**
+ * Phase 2: own-data snapshot, strict frozen-contract verdict, canonical copy
+ * of the SNAPSHOT (the schema's output objects are never read).
+ */
 function validated(ownerId: OwnerId, element: object): Entry {
   const plain = guarded(() => snapshot(element, 0, []));
   if (!isObject(plain) || (plain as { ownerId?: unknown }).ownerId !== ownerId)
     throw REJECT;
-  const parsed = OwnerStateSchema.safeParse(plain);
-  if (!parsed.success) throw REJECT;
-  const record = canonical(parsed.data, ownerId) as
+  const valid = guarded(
+    () =>
+      !reachesInheritedSetter(plain) &&
+      OwnerStateSchema.safeParse(plain).success === true,
+  );
+  if (!valid) throw REJECT;
+  const record = canonical(plain, ownerId) as
     DurableOwnerState | ActiveTaskState;
   const durable = record.kind === 'durable_owner_state';
   return {
@@ -343,7 +473,7 @@ function validated(ownerId: OwnerId, element: object): Entry {
     durable,
     category: durable ? record.content.category : undefined,
     createdAt: record.metadata.createdAt,
-    text: JSON.stringify(record),
+    text: canonicalText(record),
     record,
   };
 }
@@ -357,7 +487,8 @@ function distinct(entries: Entry[]): Entry[] {
     let end = start;
     while (end < sorted.length && sorted[end]!.id === sorted[start]!.id)
       end += 1;
-    const group = sorted.slice(start, end);
+    const group: Entry[] = [];
+    for (let i = start; i < end; i += 1) append(group, sorted[i]!);
     const first = group[0]!;
     if (group.some((e) => e.durable !== first.durable)) throw IDENTITY;
     const versions: Entry[] = [];
@@ -367,7 +498,7 @@ function distinct(entries: Entry[]): Entry[] {
         if (previous.text !== entry.text) throw DUPLICATE;
         continue;
       }
-      versions.push(entry);
+      append(versions, entry);
     }
     if (versions.some((e) => e.category !== first.category)) throw IDENTITY;
     for (let i = 1; i < versions.length; i += 1)
@@ -376,7 +507,7 @@ function distinct(entries: Entry[]): Entry[] {
         0
       )
         throw VERSION_ORDER;
-    kept.push(...versions);
+    for (const entry of versions) append(kept, entry);
     start = end;
   }
   return kept;
@@ -390,17 +521,19 @@ function distinct(entries: Entry[]): Entry[] {
 export function intakeOwnerState(request: unknown): OwnerStateIntake {
   try {
     const { ownerId, owned } = ownedElements(request);
-    const kept = distinct(owned.map((element) => validated(ownerId, element)));
+    const entries: Entry[] = [];
+    for (const element of owned) append(entries, validated(ownerId, element));
+    const kept = distinct(entries);
     const durable: DurableOwnerState[] = [];
     const activeTasks: ActiveTaskState[] = [];
     for (const { record } of kept)
-      if (record.kind === 'durable_owner_state') durable.push(record);
-      else activeTasks.push(record);
-    return Object.freeze({
-      ownerId,
-      durable: Object.freeze(durable),
-      activeTasks: Object.freeze(activeTasks),
-    });
+      if (record.kind === 'durable_owner_state') append(durable, record);
+      else append(activeTasks, record);
+    const result = dictionary();
+    result['ownerId'] = ownerId;
+    result['durable'] = Object.freeze(durable);
+    result['activeTasks'] = Object.freeze(activeTasks);
+    return Object.freeze(result) as unknown as OwnerStateIntake;
   } catch (thrown) {
     throw new OwnerModelError(
       isObject(thrown)
