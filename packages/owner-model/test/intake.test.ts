@@ -1881,3 +1881,376 @@ describe('AVEN-009 intake: lifecycle references are kept, never resolved (M2 sco
     ]);
   });
 });
+
+/* -------------------------------------------------------------------------
+ * H1: pollution installed by CALLER TRAPS after the entry gate, and M1:
+ * same-named native substitutions. Trap-installed state is removed in
+ * `finally` by `lateInstaller`, and restoration is asserted after each test.
+ * ---------------------------------------------------------------------- */
+
+/** Installs one prototype property the first time `install` runs. */
+function lateInstaller(
+  target: object,
+  key: PropertyKey,
+  descriptor: PropertyDescriptor,
+) {
+  let installed = false;
+  let before: PropertyDescriptor | undefined;
+  let length: number | undefined;
+  return {
+    install(): void {
+      if (installed) return;
+      installed = true;
+      before = Reflect.getOwnPropertyDescriptor(target, key);
+      length = Array.isArray(target) ? target.length : undefined;
+      const install = Object.create(null) as PropertyDescriptor;
+      Object.assign(install, descriptor, { configurable: true });
+      Object.defineProperty(target, key, install);
+    },
+    restore(): void {
+      if (!installed) return;
+      if (before === undefined) Reflect.deleteProperty(target, key);
+      else
+        Object.defineProperty(
+          target,
+          key,
+          Object.assign(Object.create(null) as PropertyDescriptor, before),
+        );
+      if (length !== undefined) (target as unknown[]).length = length;
+    },
+  };
+}
+
+type Placement =
+  | 'request getPrototypeOf'
+  | 'request ownKeys'
+  | 'record ownerId descriptor'
+  | 'record getPrototypeOf';
+const PLACEMENTS: readonly Placement[] = [
+  'request getPrototypeOf',
+  'request ownKeys',
+  'record ownerId descriptor',
+  'record getPrototypeOf',
+];
+
+/** A request whose trap at `placement` installs the pollution. */
+function trappedRequest(
+  placement: Placement,
+  record: Json,
+  install: () => void,
+  padding: number,
+): unknown {
+  const target =
+    placement === 'record ownerId descriptor'
+      ? new Proxy(record, {
+          getOwnPropertyDescriptor(t, k) {
+            if (k === 'ownerId') install();
+            return Reflect.getOwnPropertyDescriptor(t, k);
+          },
+        })
+      : placement === 'record getPrototypeOf'
+        ? new Proxy(record, {
+            getPrototypeOf(t) {
+              install();
+              return Reflect.getPrototypeOf(t);
+            },
+          })
+        : record;
+  const records: unknown[] = [];
+  for (let i = 0; i < padding; i += 1) records.push(foreign(i));
+  records.push(target);
+  const request = { ownerId: OWNER, records };
+  if (placement === 'request getPrototypeOf')
+    return new Proxy(request, {
+      getPrototypeOf(t) {
+        install();
+        return Reflect.getPrototypeOf(t);
+      },
+    });
+  if (placement === 'request ownKeys')
+    return new Proxy(request, {
+      ownKeys(t) {
+        install();
+        return Reflect.ownKeys(t);
+      },
+    });
+  return request;
+}
+
+describe('AVEN-009 intake: ambient integrity survives caller traps (H1)', () => {
+  afterEach(() => {
+    expect(prototypeState()).toEqual(PRISTINE);
+  });
+
+  const unbounded = () => ({
+    ...durable(),
+    scope: { kind: 'bounded', qualifiers: { recipient: 'synthetic' } },
+  });
+  const selfReplacing = () => ({
+    ...durable({ id: 'learned_x' }),
+    lifecycle: {
+      status: 'superseded',
+      supersededAt: T1,
+      replacement: { learnedItemId: 'learned_x', version: 1 },
+      eventId: 'event_x',
+    },
+  });
+
+  it('records stay invalid in a clean realm (precondition of every case)', () => {
+    expect(cleanText([unbounded()])).toBe(expected('invalid_input'));
+    expect(cleanText([selfReplacing()])).toBe(expected('invalid_input'));
+  });
+
+  for (const placement of PLACEMENTS)
+    for (const [label, make, key, forged, getter] of [
+      [
+        'non-enumerable domain DATA',
+        unbounded,
+        'domain',
+        'forged domain',
+        false,
+      ],
+      [
+        'forged lifecycle GETTER',
+        selfReplacing,
+        'lifecycle',
+        { status: 'observed' },
+        true,
+      ],
+    ] as const)
+      it(`rejects an invalid record when ${placement} installs ${label}, with zero hook calls`, () => {
+        const outcomes: string[] = [];
+        for (const padding of [0, 3, 40]) {
+          const hook = vi.fn(() => forged);
+          const late = lateInstaller(
+            Object.prototype,
+            key,
+            getter ? { get: hook } : { value: forged, writable: true },
+          );
+          const request = trappedRequest(
+            placement,
+            make(),
+            late.install,
+            padding,
+          );
+          let outcome: Captured;
+          try {
+            outcome = capture(() => intakeOwnerState(request));
+          } finally {
+            late.restore();
+          }
+          expect(hook).not.toHaveBeenCalled();
+          expect(outcome.ok, `${placement} padding ${padding}`).toBe(false);
+          outcomes.push(text(outcome));
+        }
+        for (const outcome of outcomes) {
+          expect(outcome).toBe(expected('invalid_input'));
+          expect(outcome).not.toContain('forged');
+          expect(outcome).not.toContain('PRIVATE_SENTINEL');
+        }
+      });
+
+  it('rejects valid records when a trap installs unsafe Array.prototype state, with zero hook calls', () => {
+    const getter = counted(() => 'INHERITED');
+    const setter = counted(() => undefined);
+    const toJSON = counted(() => 'COLLISION');
+    const arrayCases: [string, PropertyKey, PropertyDescriptor][] = [
+      ['index 0 data', '0', { value: 'INHERITED', writable: true }],
+      ['index 0 accessor', '0', { get: getter, set: setter }],
+      ['toJSON', 'toJSON', { value: toJSON, writable: true }],
+      [
+        'some replaced by Uint8Array some',
+        'some',
+        { value: Uint8Array.prototype.some, writable: true },
+      ],
+    ];
+    for (const placement of PLACEMENTS)
+      for (const [label, key, descriptor] of arrayCases) {
+        const late = lateInstaller(Array.prototype, key, descriptor);
+        const request = trappedRequest(placement, durable(), late.install, 2);
+        let outcome: Captured;
+        try {
+          outcome = capture(() => intakeOwnerState(request));
+        } finally {
+          late.restore();
+        }
+        expect(text(outcome), `${placement}: ${label}`).toBe(
+          expected('invalid_input'),
+        );
+      }
+    for (const hook of [getter, setter, toJSON])
+      expect(hook).not.toHaveBeenCalled();
+  });
+
+  it('still accepts the same trap-bearing requests when the traps install nothing', () => {
+    for (const placement of PLACEMENTS) {
+      const request = trappedRequest(placement, durable(), () => undefined, 2);
+      expect(intakeOwnerState(request).durable, placement).toHaveLength(1);
+    }
+  });
+});
+
+describe('AVEN-009 intake: same-named native substitutions are rejected (M1)', () => {
+  afterEach(() => {
+    expect(prototypeState()).toEqual(PRISTINE);
+  });
+
+  const countingRequest = () => {
+    const reads = vi.fn();
+    const request = new Proxy(
+      { ownerId: OWNER, records: [durable()] },
+      {
+        getPrototypeOf(t) {
+          reads();
+          return Reflect.getPrototypeOf(t);
+        },
+        ownKeys(t) {
+          reads();
+          return Reflect.ownKeys(t);
+        },
+        getOwnPropertyDescriptor(t, k) {
+          reads();
+          return Reflect.getOwnPropertyDescriptor(t, k);
+        },
+      },
+    );
+    return { reads, request };
+  };
+
+  it.each(['includes', 'some', 'sort', 'map'] as const)(
+    'rejects Array.prototype.%s = the same-named Uint8Array.prototype native before reading the request',
+    (name) => {
+      const native = Uint8Array.prototype[name];
+      const { reads, request } = countingRequest();
+      const [standard, outcome] = polluted(
+        Array.prototype,
+        name,
+        { value: native, writable: true },
+        () =>
+          [
+            ambientPrototypesAreStandard(),
+            capture(() => intakeOwnerState(request)),
+          ] as const,
+      );
+      expect(standard).toBe(false);
+      expect(reads).not.toHaveBeenCalled();
+      expect(text(outcome)).toBe(expected('invalid_input'));
+    },
+  );
+
+  it('also rejects other same-named natives (diagnostic: Array.prototype.toString = Object.prototype.toString)', () => {
+    for (const [target, name, native] of [
+      [Array.prototype, 'toString', Object.prototype.toString],
+      [Array.prototype, 'at', String.prototype.at],
+      [Array.prototype, 'indexOf', String.prototype.indexOf],
+      [Object.prototype, 'toString', Array.prototype.toString],
+      [Object.prototype, 'valueOf', Number.prototype.valueOf],
+    ] as const) {
+      const { reads, request } = countingRequest();
+      const outcome = polluted(
+        target,
+        name,
+        { value: native, writable: true },
+        () => capture(() => intakeOwnerState(request)),
+      );
+      expect(reads, name).not.toHaveBeenCalled();
+      expect(text(outcome), name).toBe(expected('invalid_input'));
+    }
+  });
+
+  it('passes every semantic probe with the ordinary Node 24 built-ins', () => {
+    expect(ambientPrototypesAreStandard()).toBe(true);
+    const { reads, request } = countingRequest();
+    expect(intakeOwnerState(request).durable).toHaveLength(1);
+    expect(reads).toHaveBeenCalled();
+  });
+});
+
+describe('AVEN-009 intake: integrity is re-established after EVERY caller interaction (H1)', () => {
+  afterEach(() => {
+    expect(prototypeState()).toEqual(PRISTINE);
+  });
+
+  /*
+   * Transient pollution: one trap installs it and the very NEXT caller
+   * operation removes it, so only the check immediately after the installing
+   * operation can see it. A valid record must still be refused: owner-model
+   * never continues while the realm is unsafe, even briefly.
+   */
+  function transient(placement: Placement) {
+    const late = lateInstaller(Object.prototype, 'domain', {
+      value: 'forged domain',
+      writable: true,
+    });
+    const record = durable();
+    let request: unknown;
+    if (
+      placement === 'request getPrototypeOf' ||
+      placement === 'request ownKeys'
+    ) {
+      request = new Proxy(
+        { ownerId: OWNER, records: [record] },
+        {
+          getPrototypeOf(t) {
+            if (placement === 'request getPrototypeOf') late.install();
+            return Reflect.getPrototypeOf(t);
+          },
+          ownKeys(t) {
+            if (placement === 'request getPrototypeOf') late.restore();
+            if (placement === 'request ownKeys') late.install();
+            return Reflect.ownKeys(t);
+          },
+          getOwnPropertyDescriptor(t, k) {
+            if (placement === 'request ownKeys') late.restore();
+            return Reflect.getOwnPropertyDescriptor(t, k);
+          },
+        },
+      );
+    } else {
+      const proxied = new Proxy(record, {
+        getOwnPropertyDescriptor(t, k) {
+          if (placement === 'record ownerId descriptor' && k === 'ownerId')
+            late.install();
+          return Reflect.getOwnPropertyDescriptor(t, k);
+        },
+        getPrototypeOf(t) {
+          if (placement === 'record ownerId descriptor') late.restore();
+          if (placement === 'record getPrototypeOf') late.install();
+          return Reflect.getPrototypeOf(t);
+        },
+        ownKeys(t) {
+          if (placement === 'record getPrototypeOf') late.restore();
+          return Reflect.ownKeys(t);
+        },
+      });
+      // For the ownerId case the very next caller operation is the records
+      // array's descriptor read of the following element: it removes the
+      // pollution, so only the check right after the ownerId read sees it.
+      const records =
+        placement === 'record ownerId descriptor'
+          ? new Proxy([proxied, foreign(1)], {
+              getOwnPropertyDescriptor(t, k) {
+                if (k === '1') late.restore();
+                return Reflect.getOwnPropertyDescriptor(t, k);
+              },
+            })
+          : [proxied];
+      request = { ownerId: OWNER, records };
+    }
+    return { late, request };
+  }
+
+  it.each(PLACEMENTS)(
+    'refuses a valid record when %s pollutes only briefly',
+    (placement) => {
+      const { late, request } = transient(placement);
+      let outcome: Captured;
+      try {
+        outcome = capture(() => intakeOwnerState(request));
+      } finally {
+        late.restore();
+      }
+      expect(text(outcome)).toBe(expected('invalid_input'));
+    },
+  );
+});
