@@ -229,12 +229,17 @@ describe('AVEN-008 foreign records are dropped before owner quotas and validatio
     for (const item of [
       { ...ownRecord(), ownerId: 'owner B' },
       { text: 'no owner at all' },
-    ])
-      await expect(
-        assemble(
-          [memorySource('episodes', 'episode_history', [item, ownRecord()])],
-          request(REQUEST),
-        ),
-      ).rejects.toMatchObject({ code: 'invalid_candidate', candidateIndex: 0 });
+    ]) {
+      const error = await assemble(
+        [memorySource('episodes', 'episode_history', [item, ownRecord()])],
+        request(REQUEST),
+      ).catch((e: unknown) => e);
+      expect(error).toMatchObject({
+        code: 'invalid_candidate',
+        sourceId: 'episodes',
+      });
+      // Ownership was never established: no public position (H3).
+      expect((error as ContextBrokerError).candidateIndex).toBeUndefined();
+    }
   });
 });

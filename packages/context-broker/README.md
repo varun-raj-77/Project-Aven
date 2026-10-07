@@ -67,7 +67,10 @@ the deadline). Each kind may return only its declared reference kinds;
 `tool_result` provenance. Any source failure, malformed collection, malformed
 candidate or limit breach fails the whole assembly with a typed error with a
 fixed message and no `cause`; adapter exceptions, getters, proxies and sparse
-arrays never leak raw errors. No partial bundle is returned.
+arrays never leak raw errors. A public `candidateIndex`, when present, is the
+owner-local zero-based position among the source's requester-owned records,
+never a raw array offset that foreign records could shift; it is omitted when
+ownership could not be established. No partial bundle is returned.
 
 ## Selection
 
