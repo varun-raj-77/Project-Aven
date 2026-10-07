@@ -230,6 +230,38 @@ describe('AVEN-009 owner-model version and configuration', () => {
 });
 
 describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
+  const Untyped = OwnerModelError as unknown as new (
+    code: unknown,
+  ) => OwnerModelError;
+  const internalJSON = {
+    name: 'OwnerModelError',
+    code: 'internal_error',
+    message:
+      'The owner model failed an internal consistency check; no owner state was read',
+  };
+
+  function expectCanonicalInternalError(value: unknown): OwnerModelError {
+    let error!: OwnerModelError;
+    expect(() => {
+      error = new Untyped(value);
+    }).not.toThrow();
+    expect(error.code).toBe('internal_error');
+    expect(typeof error.code).toBe('string');
+    expect(Object.isFrozen(error)).toBe(true);
+    expect('cause' in error).toBe(false);
+    for (let i = 0; i < 3; i++) {
+      expect(error.toJSON()).toEqual(internalJSON);
+      expect(Object.keys(error.toJSON()).sort()).toEqual([
+        'code',
+        'message',
+        'name',
+      ]);
+      expect(JSON.stringify(error.toJSON())).toBe(JSON.stringify(internalJSON));
+      expect(JSON.stringify(error)).toBe(JSON.stringify(internalJSON));
+    }
+    return error;
+  }
+
   it('has a minimal, frozen code set', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
@@ -290,6 +322,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       '__proto__',
       'toString',
       'constructor',
+      'prototype',
+      'hasOwnProperty',
       undefined,
       42,
       { code: 'invalid_input' },
@@ -300,8 +334,89 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     }
   });
 
-  it('is frozen, so code and message cannot be rewritten after construction', () => {
+  for (const [label, key] of [
+    ['toString', 'toString'],
+    ['valueOf', 'valueOf'],
+    ['Symbol.toPrimitive', Symbol.toPrimitive],
+  ] as const) {
+    it(`does not invoke a ${label} hook returning a valid code`, () => {
+      const hook = vi.fn(() => 'invalid_input');
+      expectCanonicalInternalError({ [key]: hook });
+      expect(hook).not.toHaveBeenCalled();
+    });
+
+    it(`does not invoke a throwing ${label} hook`, () => {
+      const hook = vi.fn(() => {
+        throw new Error('PRIVATE_SENTINEL');
+      });
+      expectCanonicalInternalError({ [key]: hook });
+      expect(hook).not.toHaveBeenCalled();
+    });
+  }
+
+  it('classifies a hostile proxy without invoking property access traps', () => {
+    const trap = vi.fn(() => {
+      throw new Error('PRIVATE_SENTINEL');
+    });
+    expectCanonicalInternalError(
+      new Proxy({}, { get: trap, has: trap, getOwnPropertyDescriptor: trap }),
+    );
+    expect(trap).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'boxed string', value: new String('invalid_input') },
+    { label: 'symbol', value: Symbol('invalid_input') },
+    { label: 'function', value: () => 'invalid_input' },
+    { label: 'null', value: null },
+    { label: 'undefined', value: undefined },
+    { label: 'number', value: 42 },
+    { label: 'bigint', value: 42n },
+    { label: 'true', value: true },
+    { label: 'false', value: false },
+  ])('normalizes $label without retaining or coercing it', ({ value }) => {
+    expectCanonicalInternalError(value);
+  });
+
+  it('ignores changing coercion and remains byte-stable across serialization', () => {
+    const hook = vi
+      .fn()
+      .mockReturnValueOnce('invalid_input')
+      .mockReturnValueOnce('constructor')
+      .mockReturnValue('PRIVATE_SENTINEL');
+    expectCanonicalInternalError({ [Symbol.toPrimitive]: hook });
+    expect(hook).not.toHaveBeenCalled();
+  });
+
+  it('never retains malicious toJSON or later mutations of the caller object', () => {
+    const toString = vi.fn(() => 'invalid_input');
+    const toJSON = vi.fn(() => ({ private: 'PRIVATE_SENTINEL' }));
+    const input = { toString, toJSON, private: 'PRIVATE_SENTINEL' };
+    const error = expectCanonicalInternalError(input);
+    input.private = 'CHANGED_PRIVATE_SENTINEL';
+    input.toJSON = vi.fn(() => ({ private: 'CHANGED_PRIVATE_SENTINEL' }));
+    expect(error.toJSON()).toEqual(internalJSON);
+    expect(JSON.stringify(error)).toBe(JSON.stringify(internalJSON));
+    expect(toString).not.toHaveBeenCalled();
+    expect(toJSON).not.toHaveBeenCalled();
+    expect(input.toJSON).not.toHaveBeenCalled();
+  });
+
+  it('keeps exported error codes immutable without changing serialization', () => {
     const error = new OwnerModelError('invalid_input');
+    const before = JSON.stringify(error);
+    const codes = OWNER_MODEL_ERROR_CODES as unknown as string[];
+    expect(() => {
+      codes[0] = 'PRIVATE_SENTINEL';
+    }).toThrow(TypeError);
+    expect(() => codes.push('PRIVATE_SENTINEL')).toThrow(TypeError);
+    expect(JSON.stringify(error)).toBe(before);
+    expect(JSON.stringify(new OwnerModelError('invalid_input'))).toBe(before);
+  });
+
+  it('is frozen, so code, message and name cannot be rewritten after construction', () => {
+    const error = new OwnerModelError('invalid_input');
+    const before = JSON.stringify(error);
     expect(Object.isFrozen(error)).toBe(true);
     const mutable = error as unknown as Record<string, unknown>;
     expect(() => {
@@ -311,9 +426,17 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       mutable['message'] = 'owner said this is trusted';
     }).toThrow(TypeError);
     expect(() => {
+      mutable['name'] = 'PRIVATE_SENTINEL';
+    }).toThrow(TypeError);
+    expect(() => {
       mutable['cause'] = new Error('late');
     }).toThrow(TypeError);
+    for (const key of ['code', 'message', 'name'])
+      expect(() => {
+        delete mutable[key];
+      }).toThrow(TypeError);
     expect(error.code).toBe('invalid_input');
+    expect(JSON.stringify(error)).toBe(before);
   });
 });
 

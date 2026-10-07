@@ -29,13 +29,17 @@ export interface SerializedOwnerModelError {
   readonly message: string;
 }
 
+/** Classifies untyped input without coercion or retaining caller objects. */
+function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
+  if (value === 'invalid_input') return 'invalid_input';
+  return 'internal_error';
+}
+
 export class OwnerModelError extends Error {
   declare readonly name: 'OwnerModelError';
   readonly code: OwnerModelErrorCode;
   constructor(code: OwnerModelErrorCode) {
-    const safe: OwnerModelErrorCode = Object.hasOwn(messages, code)
-      ? code
-      : 'internal_error';
+    const safe = normalizeOwnerModelErrorCode(code);
     super(messages[safe]);
     Object.defineProperty(this, 'name', {
       value: 'OwnerModelError',
