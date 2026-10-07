@@ -160,6 +160,12 @@ const KNOWN_BAD: Record<string, string[]> = {
     `import { readFileSync } from 'node:fs';`,
     `const key = process.env.PROVIDER_KEY;`,
     `globalThis['fet' + 'ch']('x')`,
+    // Process-spawning CALL patterns on their own (no module name, so only
+    // the call-pattern part of the rule can catch them).
+    `const shell = spawn('sh', ['-c', command]);`,
+    `exec(command, done);`,
+    `const out = execSync(command);`,
+    `execFile('/bin/ls', [], done);`,
   ],
   'hidden wall clock': [
     `const age = Date.now() - createdAt;`,
@@ -549,6 +555,23 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       for (const bad of KNOWN_BAD[rule]!)
         expect(violations(rule, bad), bad).not.toEqual([]);
     });
+
+  it('keeps the process call-pattern guard precise: each spawn/exec form is caught alone, String.match is not', () => {
+    const rule = 'network, file, process or environment capability';
+    for (const bad of [
+      `spawn('sh')`,
+      `spawn ('sh')`,
+      `exec('ls')`,
+      `execSync('ls')`,
+      `execFile('ls')`,
+    ])
+      expect(violations(rule, bad), bad).not.toEqual([]);
+    // The production timestamp parser uses String.prototype.match, which
+    // must not trip the guard (RegExp#exec would, by design).
+    expect(violations(rule, `const parts = text.match(TIMESTAMP);`)).toEqual(
+      [],
+    );
+  });
 
   it('allows an explicit timestamp argument, which is not a hidden clock', () => {
     expect(

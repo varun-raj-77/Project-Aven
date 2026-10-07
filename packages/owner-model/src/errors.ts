@@ -56,10 +56,14 @@ export class OwnerModelError extends Error {
   constructor(code: OwnerModelErrorCode) {
     const safe = normalizeOwnerModelErrorCode(code);
     super(messages[safe]);
-    Object.defineProperty(this, 'name', {
-      value: 'OwnerModelError',
-      enumerable: false,
-    });
+    // A null-prototype descriptor: an inherited `get`, `set`, `writable` or
+    // `configurable` on Object.prototype cannot change how `name` is defined.
+    const name = Object.create(null) as PropertyDescriptor;
+    name.value = 'OwnerModelError';
+    name.enumerable = false;
+    name.writable = false;
+    name.configurable = false;
+    Object.defineProperty(this, 'name', name);
     this.code = safe;
     Object.freeze(this);
   }
