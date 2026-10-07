@@ -30,13 +30,21 @@ const source: Record<string, string> = Object.fromEntries(
 const all = Object.values(source).join('\n');
 
 /**
- * Exact named imports permitted per external module. Patch 1 imports nothing
- * from either; later patches extend these sets deliberately. Any other
+ * Exact named imports permitted per external module. Patch 1 imported nothing
+ * from either; patch 2 adds only the frozen contract names intake needs.
+ * Later patches extend these sets deliberately. Any other
  * module, any `node:*` module and any relative path leaving `src/` fails.
  */
 const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   zod: new Set(['z']),
-  '@aven/contracts': new Set<string>(),
+  // Patch 2: the frozen owner-state union and owner ID schema, plus types.
+  '@aven/contracts': new Set<string>([
+    'OwnerIdSchema',
+    'OwnerStateSchema',
+    'ActiveTaskState',
+    'DurableOwnerState',
+    'OwnerId',
+  ]),
 };
 
 function importViolations(text: string): string[] {
@@ -262,10 +270,13 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
+      'conflicting_duplicate',
+      'identity_conflict',
+      'version_order_conflict',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -276,6 +287,12 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'The owner-model input is malformed; no owner state was read',
       internal_error:
         'The owner model failed an internal consistency check; no owner state was read',
+      conflicting_duplicate:
+        'Owner-state records share an identity and version but disagree; no owner state was read',
+      identity_conflict:
+        'An owner-state identity changes record kind or category across versions; no owner state was read',
+      version_order_conflict:
+        'An owner-state creation time moves backwards as its version increases; no owner state was read',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -441,21 +458,25 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
 });
 
 describe('AVEN-009 owner-model public surface (scaffold only)', () => {
-  it('exports a pinned surface with no owner-state, correction, promotion, authority or model API', () => {
+  it('exports a pinned surface with no view, lineage, correction, promotion, authority or model API', () => {
     expect(Object.keys(publicApi).sort()).toEqual(
       [
         'AVEN_009_OWNER_MODEL_VERSION',
         'OWNER_MODEL_CONFIG',
         'OWNER_MODEL_ERROR_CODES',
         'OwnerModelError',
+        'intakeOwnerState',
       ].sort(),
     );
     const functions = Object.entries(publicApi).filter(
       ([, value]) => typeof value === 'function',
     );
-    // The only callable export is the error class; nothing reads, infers,
-    // corrects, promotes, decides authority or invokes a model.
-    expect(functions.map(([name]) => name)).toEqual(['OwnerModelError']);
+    // The callable exports are the error class and the patch-2 intake; nothing
+    // infers, corrects, promotes, decides authority or invokes a model.
+    expect(functions.map(([name]) => name).sort()).toEqual([
+      'OwnerModelError',
+      'intakeOwnerState',
+    ]);
     for (const [name, value] of Object.entries(publicApi))
       if (typeof value === 'object')
         expect(Object.isFrozen(value), name).toBe(true);
@@ -472,6 +493,8 @@ describe('AVEN-009 owner-model public surface (scaffold only)', () => {
     vi.resetModules();
     const fresh = await import('../src/index.ts');
     new fresh.OwnerModelError('invalid_input').toJSON();
+    fresh.intakeOwnerState({ ownerId: 'owner_synthetic_a', records: [] });
+    expect(() => fresh.intakeOwnerState({})).toThrow(fresh.OwnerModelError);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 
@@ -481,11 +504,15 @@ describe('AVEN-009 owner-model public surface (scaffold only)', () => {
 });
 
 describe('AVEN-009 owner-model static regression tripwires (not runtime security)', () => {
-  it('keeps production modules in a known, reviewed set with no domain modules yet', () => {
-    expect(files.sort()).toEqual(['config.ts', 'errors.ts', 'index.ts']);
+  it('keeps production modules in a known, reviewed set with no later-patch modules', () => {
+    expect(files.sort()).toEqual([
+      'config.ts',
+      'errors.ts',
+      'index.ts',
+      'intake.ts',
+    ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
     for (const later of [
-      'intake.ts',
       'lineage.ts',
       'claims.ts',
       'views.ts',
