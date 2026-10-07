@@ -10,14 +10,26 @@
  * approves anything.
  *
  * The code set is deliberately minimal. Later AVEN-009 patches add codes only
- * when their own behavior needs them.
+ * when their own behavior needs them. Patch 2 (owner-state intake) adds the
+ * three identity codes; none carries a position, ID, count or owner.
  */
-export type OwnerModelErrorCode = 'invalid_input' | 'internal_error';
+export type OwnerModelErrorCode =
+  | 'invalid_input'
+  | 'internal_error'
+  | 'conflicting_duplicate'
+  | 'identity_conflict'
+  | 'version_order_conflict';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
   internal_error:
     'The owner model failed an internal consistency check; no owner state was read',
+  conflicting_duplicate:
+    'Owner-state records share an identity and version but disagree; no owner state was read',
+  identity_conflict:
+    'An owner-state identity changes record kind or category across versions; no owner state was read',
+  version_order_conflict:
+    'An owner-state creation time moves backwards as its version increases; no owner state was read',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -32,6 +44,9 @@ export interface SerializedOwnerModelError {
 /** Classifies untyped input without coercion or retaining caller objects. */
 function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'invalid_input') return 'invalid_input';
+  if (value === 'conflicting_duplicate') return 'conflicting_duplicate';
+  if (value === 'identity_conflict') return 'identity_conflict';
+  if (value === 'version_order_conflict') return 'version_order_conflict';
   return 'internal_error';
 }
 
