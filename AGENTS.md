@@ -3,13 +3,19 @@
 ## Authority and scope
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
-reveals a concrete fatal problem. Current authorized work is **AVEN-008 only**:
-the Context Broker (deterministic, owner-scoped, budgeted task-context assembly
-over injected transient candidate sources). AVEN-001 through AVEN-007 and
-MAINT-001 are frozen; the current baseline is `1658eda` (tag `aven-007`). Do not
-begin AVEN-009. AVEN-008 commits belong only on an isolated candidate branch for
-external review: never push to `main`, merge, or create the `aven-008` tag.
-Existing research outside this repository is historical.
+reveals a concrete fatal problem. Current authorized work is **AVEN-009 only**:
+the Typed Owner Model (`packages/owner-model`), implemented patch by patch.
+AVEN-001 through AVEN-008 and MAINT-001 are frozen; the current baseline is tag
+`aven-008`, commit `4174080998d383fe78e8e4799e13103d42635151`. Do not
+semantically modify a frozen layer. Do not begin AVEN-010 or any later
+milestone. Owner-model work stays representation- and read-oriented: typed,
+owner-isolated, deterministic structures and views over the frozen contracts. It
+performs no learning, preference inference, correction detection or
+interpretation, negative-signal generation, promotion or trust decision,
+authority or permission decision, Root change, tool execution, or model/provider
+call. AVEN-009 commits belong only on an isolated candidate branch for external
+review: never push to `main`, merge, or create the `aven-009` tag. Existing
+research outside this repository is historical.
 
 Read these sources completely before changing the design:
 
@@ -77,9 +83,9 @@ Consequences:
 - Run `pnpm check` after relevant changes. Tests cover bootstrap experiment
   discipline, shared contracts, SQLite integrity, Ledger behavior, the local API
   boundary, the model-runtime boundary and model-output recording path, the
-  AVEN-007 A/B baselines and dataset integrity, and the AVEN-008 Context
-  Broker's selection mechanics, not a complete Aven runtime. Report limitations
-  honestly.
+  AVEN-007 A/B baselines and dataset integrity, the AVEN-008 Context Broker's
+  selection mechanics, and the AVEN-009 owner-model scaffold boundaries, not a
+  complete Aven runtime. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -154,13 +160,18 @@ storage, Ledger, runtime, baseline, network, persistence, learning, correction
 inference or authority. Its bundle is not a prompt and is not wired into the API
 paths. Provider credentials, when a later milestone adds a live adapter, come
 from external operator/Root configuration and are never stored in the Ledger,
-owner memory, model input or runtime metadata. Other app/package directories
-remain placeholders. Tooling schemas still describe experimental metadata only.
-No live provider adapter or network model call, Strands or other framework
-adapter, public generation route, typed Owner Model, Owner Model retrieval or
-rebuild, learning algorithms, correction handling, negative-signal generation,
-routing, streaming, tool calling, Root enforcement, authentication, UI,
-execution, scorer, promotion controller, or agent orchestration in this
-milestone. Stop after reporting files, checks, assumptions, and deliberate
-deferrals for external review. Commit only to the isolated AVEN-008 candidate
-branch; do not merge or tag.
+owner memory, model input or runtime metadata. `packages/owner-model`
+(`@aven/owner-model`, version `aven-009-owner-model-v1`) is the AVEN-009 Typed
+Owner Model. It reuses the frozen AVEN-002 owner-state, provenance, scope and
+lifecycle contracts rather than defining a second vocabulary, keeps the
+`.gitkeep` that the AVEN-008 tripwire pins, and its core depends only on
+`@aven/contracts` and `zod`; any storage, Ledger or Context Broker dependency is
+added only by its own reviewed patch. Other app/package directories remain
+placeholders. Tooling schemas still describe experimental metadata only. No live
+provider adapter or network model call, Strands or other framework adapter,
+public generation route, owner-state writer, learning algorithms, correction
+handling, negative-signal generation, routing, streaming, tool calling, Root
+enforcement, authentication, UI, execution, scorer, promotion controller, or
+agent orchestration in this milestone. Stop after each patch and report files,
+checks, assumptions, and deliberate deferrals for external review. Commit only
+to the isolated AVEN-009 candidate branch; do not merge or tag.

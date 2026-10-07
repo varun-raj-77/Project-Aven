@@ -1,0 +1,22 @@
+{
+  "name": "@aven/owner-model",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-009 Typed Owner Model (patch 1 scaffold): version, error and boundary guardrails only; no owner-state behavior, storage, Ledger, model runtime, network, learning or authority",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/owner-model/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
