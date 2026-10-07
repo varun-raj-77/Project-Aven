@@ -5,6 +5,8 @@ import {
   type DurableOwnerState,
   type OwnerId,
 } from '@aven/contracts';
+import { ambientPrototypesAreStandard } from './ambient.ts';
+import { canonicalText, compareCodeUnits } from './canonical-text.ts';
 import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
 
 /**
@@ -68,16 +70,17 @@ import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
  * built from the validated snapshot, never from the schema's output objects
  * (the frozen contracts apply no transforms or defaults, so the data is the
  * same). Duplicate identity uses an own-data serializer that never consults
- * `toJSON` or any other hook. The frozen Zod schema builds its own output
- * from ordinary objects by assignment, so an inherited SETTER at a key the
- * record supplies would run inside it: intake detects any such setter on
- * Object.prototype or Array.prototype by descriptor (nothing is invoked) and
- * fails closed with `invalid_input` before validating. Residual, documented
- * limitation: an inherited getter at a key that the frozen AVEN-002
- * refinements themselves read on the schema's output (for example
- * `lifecycle`) can still execute inside that frozen code; any throw there is
- * caught and reported only as `invalid_input`. Closing that path needs a
- * frozen-contract or realm-level change, not an AVEN-009 one.
+ * `toJSON` or any other hook (see canonical-text.ts).
+ *
+ * Ambient-prototype gate: the frozen Zod schema builds its own output from
+ * ORDINARY objects and arrays and its refinements read fields from them, so
+ * an inherited property there could change its verdict (reproduced: an
+ * inherited `domain` value or `lifecycle` getter made invalid records pass).
+ * Before reading anything, intake therefore requires Object.prototype and
+ * Array.prototype to match an explicit, pinned standard baseline (see
+ * ambient.ts), inspecting descriptors only. Any deviation fails closed with
+ * `invalid_input`, even for otherwise-valid records: in a polluted realm
+ * integrity takes precedence over availability.
  *
  * Nested owner identity: the frozen contracts carry an owner ID only in
  * owner-origin provenance (`provenance.ownerId`) and in owner confirmation
@@ -200,51 +203,6 @@ function append<T>(array: T[], value: T): void {
   Object.defineProperty(array, array.length, descriptor);
 }
 
-/*
- * Prototype chains of the ordinary objects and arrays that the frozen schema
- * builds its own output from (intake never reads that output).
- */
-const OBJECT_CHAIN: readonly object[] = Object.freeze([Object.prototype]);
-const ARRAY_CHAIN: readonly object[] = Object.freeze([
-  Array.prototype,
-  Object.prototype,
-]);
-
-/** Whether assigning `key` on an object with this chain runs a setter. */
-function inheritedSetter(chain: readonly object[], key: string): boolean {
-  for (const prototype of chain) {
-    const descriptor = Reflect.getOwnPropertyDescriptor(prototype, key);
-    if (descriptor !== undefined)
-      return Object.hasOwn(descriptor, 'set') && descriptor.set !== undefined;
-  }
-  return false;
-}
-
-/**
- * Whether validating this snapshot would make the frozen schema assign a key
- * through an inherited setter. Descriptors only: nothing is invoked.
- */
-function reachesInheritedSetter(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i += 1)
-      if (
-        inheritedSetter(ARRAY_CHAIN, String(i)) ||
-        reachesInheritedSetter(value[i])
-      )
-        return true;
-    return false;
-  }
-  if (!isObject(value)) return false;
-  const record = value as Record<string, unknown>;
-  for (const key of Object.keys(record))
-    if (
-      inheritedSetter(OBJECT_CHAIN, key) ||
-      reachesInheritedSetter(record[key])
-    )
-      return true;
-  return false;
-}
-
 /** Plain-data copy of one record; must be called inside `guarded`. */
 function snapshot(value: unknown, depth: number, ancestors: object[]): unknown {
   if (
@@ -308,10 +266,6 @@ function enumerableData(target: object, key: string): unknown {
   return descriptor.value;
 }
 
-function compareCodeUnits(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
 /**
  * Fresh, frozen copy of validated snapshot data: null-prototype objects with
  * keys in code-unit order, `undefined` values omitted, and any nested
@@ -334,37 +288,6 @@ function canonical(value: unknown, ownerId: string): unknown {
     copy[key] = canonical(entry, ownerId);
   }
   return Object.freeze(copy);
-}
-
-/**
- * Deterministic text of canonical own data, for duplicate identity and order.
- * It walks own keys and dense indices itself and serializes primitives only,
- * so no `toJSON` or other inherited hook can take part (a primitive string or
- * number given to JSON.stringify is never asked for `toJSON`).
- */
-function canonicalText(value: unknown): string {
-  if (value === null) return 'null';
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw INTERNAL;
-    return JSON.stringify(value);
-  }
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (Array.isArray(value)) {
-    let text = '[';
-    for (let i = 0; i < value.length; i += 1)
-      text += `${i === 0 ? '' : ','}${canonicalText(value[i])}`;
-    return `${text}]`;
-  }
-  if (!isObject(value)) throw INTERNAL;
-  const record = value as Record<string, unknown>;
-  let text = '{';
-  let first = true;
-  for (const key of Object.keys(record).sort(compareCodeUnits)) {
-    text += `${first ? '' : ','}${JSON.stringify(key)}:${canonicalText(record[key])}`;
-    first = false;
-  }
-  return `${text}}`;
 }
 
 /* Exact instant comparison of frozen AVEN-002 timestamps (no clock). */
@@ -459,9 +382,7 @@ function validated(ownerId: OwnerId, element: object): Entry {
   if (!isObject(plain) || (plain as { ownerId?: unknown }).ownerId !== ownerId)
     throw REJECT;
   const valid = guarded(
-    () =>
-      !reachesInheritedSetter(plain) &&
-      OwnerStateSchema.safeParse(plain).success === true,
+    () => OwnerStateSchema.safeParse(plain).success === true,
   );
   if (!valid) throw REJECT;
   const record = canonical(plain, ownerId) as
@@ -520,6 +441,7 @@ function distinct(entries: Entry[]): Entry[] {
  */
 export function intakeOwnerState(request: unknown): OwnerStateIntake {
   try {
+    if (!guarded(ambientPrototypesAreStandard)) throw REJECT;
     const { ownerId, owned } = ownedElements(request);
     const entries: Entry[] = [];
     for (const element of owned) append(entries, validated(ownerId, element));

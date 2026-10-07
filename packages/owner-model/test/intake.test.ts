@@ -5,6 +5,8 @@ import {
   type OwnerModelErrorCode,
   type OwnerStateIntake,
 } from '../src/index.ts';
+import { ambientPrototypesAreStandard } from '../src/ambient.ts';
+import { canonicalText } from '../src/canonical-text.ts';
 import {
   activeTask,
   deeplyFrozen,
@@ -1140,13 +1142,24 @@ function capture(call: () => OwnerStateIntake): Captured {
   }
 }
 
+/**
+ * Every own key and descriptor of both prototypes, plus Array.prototype's
+ * chain. Sorted by key text: re-adding a deleted standard property restores
+ * the realm even though it changes enumeration order.
+ */
 function prototypeState(): unknown {
   const describe = (target: object) =>
-    Reflect.ownKeys(target).map((key) => [
-      key,
-      Reflect.getOwnPropertyDescriptor(target, key),
-    ]);
-  return [describe(Object.prototype), describe(Array.prototype)];
+    Reflect.ownKeys(target)
+      .map(
+        (key) =>
+          [String(key), Reflect.getOwnPropertyDescriptor(target, key)] as const,
+      )
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return [
+    describe(Object.prototype),
+    describe(Array.prototype),
+    Object.getPrototypeOf(Array.prototype) === Object.prototype,
+  ];
 }
 const PRISTINE = prototypeState();
 
@@ -1187,352 +1200,382 @@ const text = (outcome: Captured): string => {
 const procedure = () => durable({ id: 'learned_p', category: 'procedure' });
 const cleanText = (records: unknown[]) => text(capture(() => run(records)));
 
-describe('AVEN-009 intake: own data only under ambient prototype pollution (H1)', () => {
+/** Applies an arbitrary realm change for the duration of `body` only. */
+function altered<T>(apply: () => void, restore: () => void, body: () => T): T {
+  apply();
+  try {
+    return body();
+  } finally {
+    restore();
+  }
+}
+
+const counted = <T extends (...args: never[]) => unknown>(fn: T) => vi.fn(fn);
+
+/** Every relevant descriptor kind an attacker could install. */
+function hostileDescriptors(): [
+  string,
+  PropertyDescriptor,
+  ReturnType<typeof vi.fn>,
+][] {
+  const getter = counted(() => 'INHERITED');
+  const throwing = counted(() => {
+    throw new Error('PRIVATE_SENTINEL');
+  });
+  const setter = counted(() => undefined);
+  const both = counted(() => 'INHERITED');
+  const hook = counted(() => 'COLLISION');
+  return [
+    ['string data', { value: 'INHERITED', writable: true }, counted(() => 0)],
+    [
+      'enumerable data',
+      { value: 'INHERITED', writable: true, enumerable: true },
+      counted(() => 0),
+    ],
+    [
+      'object data',
+      { value: { status: 'observed', kind: 'global' }, writable: true },
+      counted(() => 0),
+    ],
+    ['function data', { value: hook, writable: true }, hook],
+    ['getter', { get: getter }, getter],
+    ['throwing getter', { get: throwing }, throwing],
+    ['setter', { set: setter }, setter],
+    ['getter and setter', { get: both, set: both }, both],
+  ];
+}
+
+describe('AVEN-009 intake: ambient-prototype gate (fail closed, zero hooks)', () => {
   afterEach(() => {
     expect(prototypeState()).toEqual(PRISTINE);
   });
 
-  it('never lets an inherited value satisfy a required field (any category, any field)', () => {
-    const cases: [string, Json, string[]][] = [
-      ['fact', durable({ category: 'fact' }), ['content', 'assertion']],
-      ['fact', durable({ category: 'fact' }), ['content', 'subject']],
+  it('matches the pinned baseline in a clean Node 24 realm, so clean intake is unaffected', () => {
+    expect(ambientPrototypesAreStandard()).toBe(true);
+    expect(run([procedure(), durable(), activeTask()]).durable).toHaveLength(2);
+  });
+
+  /*
+   * Each record below is INVALID under the frozen schema in a clean realm.
+   * Before this fix, each became ACCEPTED under the listed pollution, because
+   * the frozen refinements read the field from the schema's own ordinary
+   * output objects (reproduced on 74c782b). Now: invalid_input, zero hooks.
+   */
+  const unbounded = () => ({
+    ...durable(),
+    scope: { kind: 'bounded', qualifiers: { recipient: 'synthetic' } },
+  });
+  const selfReplacing = () => ({
+    ...durable({ id: 'learned_x' }),
+    lifecycle: {
+      status: 'superseded',
+      supersededAt: T1,
+      replacement: { learnedItemId: 'learned_x', version: 1 },
+      eventId: 'event_x',
+    },
+  });
+  const contestedWithoutCounterexamples = () =>
+    with_(durable(), (r) => {
+      (r['evidence'] as Json)['support'] = 'contested';
+      (r['evidence'] as Json)['counterexamples'] = [];
+    });
+  const verdictCases: [string, () => Json, string, 'get' | 'value', unknown][] =
+    [
       [
-        'preference',
-        durable({ category: 'preference' }),
-        ['content', 'desiredBehavior'],
+        'self-replacing superseded record',
+        selfReplacing,
+        'lifecycle',
+        'get',
+        { status: 'observed' },
       ],
-      ['episode', durable({ category: 'episode' }), ['content', 'summary']],
       [
-        'intent_pattern',
-        durable({ category: 'intent_pattern' }),
-        ['content', 'cue'],
+        'contested evidence without counterexamples',
+        contestedWithoutCounterexamples,
+        'support',
+        'get',
+        'limited',
       ],
-      ['procedure', procedure(), ['content', 'objective']],
-      ['record', durable(), ['metadata']],
-      ['record', durable(), ['lifecycle']],
-      ['task', activeTask(), ['objective']],
+      [
+        'bounded scope without a boundary (forged domain getter)',
+        unbounded,
+        'domain',
+        'get',
+        'forged domain',
+      ],
+      [
+        'bounded scope without a boundary (inherited domain data)',
+        unbounded,
+        'domain',
+        'value',
+        'forged domain',
+      ],
+      [
+        'bounded scope without a boundary (inherited taskType data)',
+        unbounded,
+        'taskType',
+        'value',
+        'forged type',
+      ],
+      [
+        'bounded scope without a boundary (inherited taskId data)',
+        unbounded,
+        'taskId',
+        'value',
+        'task_forged',
+      ],
     ];
-    for (const [label, record, path] of cases) {
-      const holder = path.length === 2 ? (record[path[0]!] as Json) : record;
-      const field = path[path.length - 1]!;
-      const inherited = structuredClone(holder[field]);
-      delete holder[field];
-      for (const enumerable of [false, true]) {
-        const outcome = polluted(
-          Object.prototype,
-          field,
-          { value: inherited, writable: true, enumerable },
-          () => capture(() => run([record])),
+  it.each(verdictCases)(
+    'never lets ambient state accept an invalid record: %s',
+    (_label, make, key, kind, forged) => {
+      expect(cleanText([make()])).toBe(expected('invalid_input'));
+      const input = make();
+      const hook = vi.fn(() => forged);
+      const descriptor: PropertyDescriptor =
+        kind === 'get' ? { get: hook } : { value: forged, writable: true };
+      const outcome = polluted(Object.prototype, key, descriptor, () =>
+        capture(() => run([input])),
+      );
+      expect(hook).not.toHaveBeenCalled();
+      expect(outcome.ok).toBe(false);
+      expect(text(outcome)).toBe(expected('invalid_input'));
+      expect(text(outcome)).not.toContain('forged');
+    },
+  );
+
+  it('fails closed for valid records under any Object.prototype pollution, with zero hook calls', () => {
+    const input = [procedure(), durable(), activeTask()];
+    for (const key of [
+      'assertion',
+      'precondition',
+      'lifecycle',
+      'until',
+      'toJSON',
+      'syntheticUnrelated',
+      '0',
+      'scope',
+      'constructorX',
+    ]) {
+      for (const [kind, descriptor, hook] of hostileDescriptors()) {
+        const outcome = polluted(Object.prototype, key, descriptor, () =>
+          capture(() => run(input)),
         );
-        expect(text(outcome), `${label}.${field}`).toBe(
-          expected('invalid_input'),
-        );
+        expect(hook, `${key} ${kind}`).not.toHaveBeenCalled();
+        expect(text(outcome), `${key} ${kind}`).toBe(expected('invalid_input'));
+        expect(text(outcome)).not.toContain('PRIVATE_SENTINEL');
+        expect(text(outcome)).not.toContain(key === '0' ? 'never' : key);
       }
     }
-    const fact = durable();
-    delete (fact['content'] as Json)['assertion'];
-    const outcome = polluted(
+  });
+
+  it('fails closed for valid records under any Array.prototype pollution, with zero hook calls', () => {
+    const input = [procedure(), durable(), activeTask()];
+    for (const key of [
+      '0',
+      '1',
+      '7',
+      'toJSON',
+      'syntheticUnrelated',
+      'assertion',
+      'evidenceId',
+    ]) {
+      for (const [kind, descriptor, hook] of hostileDescriptors()) {
+        const outcome = polluted(Array.prototype, key, descriptor, () =>
+          capture(() => run(input)),
+        );
+        expect(hook, `${key} ${kind}`).not.toHaveBeenCalled();
+        expect(text(outcome), `${key} ${kind}`).toBe(expected('invalid_input'));
+      }
+    }
+  });
+
+  it('fails closed when a standard property is modified, without calling the replacement', () => {
+    const input = [procedure(), durable(), activeTask()];
+    const replacement = counted(function some() {
+      return true;
+    });
+    const cases: [string, object, PropertyKey, PropertyDescriptor][] = [
+      [
+        'Object.prototype.toString as JS function',
+        Object.prototype,
+        'toString',
+        { value: replacement, writable: true },
+      ],
+      [
+        'Object.prototype.toString as getter',
+        Object.prototype,
+        'toString',
+        { get: replacement },
+      ],
+      [
+        'Object.prototype.toString made enumerable',
+        Object.prototype,
+        'toString',
+        { value: Object.prototype.toString, writable: true, enumerable: true },
+      ],
+      [
+        'Object.prototype.hasOwnProperty swapped for another native',
+        Object.prototype,
+        'hasOwnProperty',
+        { value: Object.prototype.isPrototypeOf, writable: true },
+      ],
+      [
+        'Object.prototype.valueOf as bound native',
+        Object.prototype,
+        'valueOf',
+        { value: Object.prototype.valueOf.bind(null), writable: true },
+      ],
+      [
+        'Object.prototype.constructor as data string',
+        Object.prototype,
+        'constructor',
+        { value: 'Object', writable: true },
+      ],
+      [
+        'Object.prototype symbol key',
+        Object.prototype,
+        Symbol.toPrimitive,
+        { value: replacement, writable: true },
+      ],
+      [
+        'Array.prototype.some as JS function',
+        Array.prototype,
+        'some',
+        { value: replacement, writable: true },
+      ],
+      [
+        'Array.prototype.some swapped for every',
+        Array.prototype,
+        'some',
+        { value: Array.prototype.every, writable: true },
+      ],
+      [
+        'Array.prototype.map as Proxy of native',
+        Array.prototype,
+        'map',
+        { value: new Proxy(Array.prototype.map, {}), writable: true },
+      ],
+      [
+        'Array.prototype iterator replaced',
+        Array.prototype,
+        Symbol.iterator,
+        { value: replacement, writable: true },
+      ],
+      [
+        'Array.prototype unscopables as getter',
+        Array.prototype,
+        Symbol.unscopables,
+        { get: replacement },
+      ],
+      [
+        'Array.prototype.length non-zero',
+        Array.prototype,
+        'length',
+        { value: 3, writable: true, configurable: false },
+      ],
+    ];
+    for (const [label, target, key, descriptor] of cases) {
+      const outcome =
+        key === 'length'
+          ? altered(
+              () => ((Array.prototype as unknown[]).length = 3),
+              () => ((Array.prototype as unknown[]).length = 0),
+              () => capture(() => run(input)),
+            )
+          : polluted(target, key, descriptor, () => capture(() => run(input)));
+      expect(text(outcome), label).toBe(expected('invalid_input'));
+    }
+    expect(replacement).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a standard property is missing or the prototype chain is changed', () => {
+    const input = [procedure()];
+    const at = Reflect.getOwnPropertyDescriptor(Array.prototype, 'at')!;
+    const missing = altered(
+      () => Reflect.deleteProperty(Array.prototype, 'at'),
+      () => Object.defineProperty(Array.prototype, 'at', at),
+      () => capture(() => run(input)),
+    );
+    const interposed = Object.create(Object.prototype) as object;
+    const rechained = altered(
+      () => Object.setPrototypeOf(Array.prototype, interposed),
+      () => Object.setPrototypeOf(Array.prototype, Object.prototype),
+      () => capture(() => run(input)),
+    );
+    expect(text(missing)).toBe(expected('invalid_input'));
+    expect(text(rechained)).toBe(expected('invalid_input'));
+  });
+
+  it('is deterministic under pollution: every run and every input fails identically', () => {
+    const inputs = [
+      [],
+      [durable()],
+      [foreign(1)],
+      [selfReplacing()],
+      [durable(), durable()],
+    ];
+    const outcomes = polluted(
       Object.prototype,
       'assertion',
-      { value: 'INHERITED_INVENTED_FACT', writable: true },
-      () => capture(() => run([fact])),
-    );
-    expect(text(outcome)).toBe(expected('invalid_input'));
-    expect(text(outcome)).not.toContain('INHERITED_INVENTED_FACT');
-  });
-
-  it('never lets an inherited value supply an optional field or appear in output', () => {
-    const clean = cleanText([procedure(), durable()]);
-    let readInside: unknown[] = [];
-    const outcome = polluted(
-      Object.prototype,
-      'precondition',
-      { value: 'INHERITED_GATE', writable: true, enumerable: true },
+      { value: 'INHERITED', writable: true },
       () =>
-        polluted(
-          Object.prototype,
-          'taskType',
-          { value: 'INHERITED_SCOPE', writable: true, enumerable: true },
-          () => {
-            const result = capture(() => run([procedure(), durable()]));
-            if (result.ok) {
-              const steps = result.result.durable.find(
-                (r) => r.content.category === 'procedure',
-              )!.content as unknown as { steps: Json[] };
-              readInside = [
-                steps.steps[0]!['precondition'],
-                (result.result.durable[0]!.scope as unknown as Json)[
-                  'taskType'
-                ],
-              ];
-            }
-            return result;
-          },
-        ),
+        inputs.flatMap((records) => [
+          capture(() => run(records)),
+          capture(() => run(records)),
+        ]),
     );
-    expect(text(outcome)).toBe(clean);
-    expect(readInside).toEqual([undefined, undefined]);
-  });
-
-  it('never runs an inherited getter: a valid procedure is unchanged under a throwing precondition getter', () => {
-    const getter = vi.fn(() => {
-      throw new Error('PRIVATE_SENTINEL');
-    });
-    const clean = cleanText([procedure()]);
-    let insideRead: unknown = 'not read';
-    const outcome = polluted(
-      Object.prototype,
-      'precondition',
-      { get: getter },
-      () => {
-        const result = capture(() => run([procedure()]));
-        if (result.ok) {
-          const steps = (
-            result.result.durable[0]!.content as unknown as { steps: Json[] }
-          ).steps;
-          try {
-            insideRead = [steps[0]!['precondition'], steps[1]!['precondition']];
-          } catch {
-            insideRead = 'getter ran';
-          }
-        }
-        return result;
-      },
-    );
-    expect(getter).not.toHaveBeenCalled();
-    expect(outcome.ok).toBe(true);
-    expect(text(outcome)).toBe(clean);
-    expect(text(outcome)).not.toContain('PRIVATE_SENTINEL');
-    expect(insideRead).toEqual([undefined, 'Synthetic gate']);
-  });
-
-  it('never runs an inherited getter at other contract fields the schema does not refine', () => {
-    for (const field of [
-      'objective',
-      'instruction',
-      'subject',
-      'summary',
-      'cue',
-      'interpretedIntent',
-      'desiredBehavior',
-      'occurredAt',
-      'inferenceCertainty',
-      'createdAt',
-      'openLoops',
-    ]) {
-      const getter = vi.fn(() => {
-        throw new Error('PRIVATE_SENTINEL');
-      });
-      const records = () => [
-        procedure(),
-        durable({ id: 'learned_e', category: 'episode' }),
-        durable({ id: 'learned_i', category: 'intent_pattern' }),
-        activeTask(),
-      ];
-      const clean = cleanText(records());
-      const input = records(); // built before the pollution is installed
-      const outcome = polluted(Object.prototype, field, { get: getter }, () =>
-        capture(() => run(input)),
-      );
-      expect(getter, field).not.toHaveBeenCalled();
-      expect(text(outcome), field).toBe(clean);
-    }
-  });
-
-  it('documents the residual: a getter at a key the frozen refinements read fails closed, sanitized', () => {
-    // The frozen AVEN-002 refinements read some fields (for example scope
-    // `domain`, evidence `support`, `lifecycle`, `provenance`) on the frozen
-    // schema's own ordinary output objects. An inherited getter there can run
-    // inside that frozen code (see intake.ts); intake can only contain it: the
-    // public result is the fixed invalid_input error and nothing leaks.
-    for (const field of ['domain', 'support', 'lifecycle', 'provenance']) {
-      const outcome = polluted(
-        Object.prototype,
-        field,
-        {
-          get: () => {
-            throw new Error('PRIVATE_SENTINEL');
-          },
-        },
-        () => capture(() => run([durable()])),
-      );
-      expect(text(outcome), field).toBe(expected('invalid_input'));
-      expect(text(outcome), field).not.toContain('PRIVATE_SENTINEL');
-    }
-  });
-
-  it('fails closed, without invoking it, when an inherited setter would intercept validation', () => {
-    for (const [target, key] of [
-      [Object.prototype, 'instruction'],
-      [Object.prototype, 'assertion'],
-      [Array.prototype, '1'],
-      [Object.prototype, '0'],
-    ] as const) {
-      const setter = vi.fn();
-      const getter = vi.fn(() => 'INHERITED');
-      const outcome = polluted(target, key, { get: getter, set: setter }, () =>
-        capture(() => run([procedure(), durable()])),
-      );
-      expect(setter, key).not.toHaveBeenCalled();
-      expect(getter, key).not.toHaveBeenCalled();
-      expect(text(outcome), key).toBe(expected('invalid_input'));
-    }
-  });
-
-  it('detects conflicting duplicates under an inherited toJSON, in both orders, without calling it', () => {
-    const toJSON = vi.fn(() => 'COLLISION');
-    const a = observed('learned_x', 'Synthetic assertion A');
-    const b = observed('learned_x', 'Synthetic assertion B');
-    const evidenceSwap = with_(durable({ id: 'learned_y' }), (r) => {
-      (r['evidence'] as Json)['supportingEvidence'] = [
-        { evidenceId: 'evidence_s1', eventId: 'event_s1' },
-        { evidenceId: 'evidence_s3', eventId: 'event_s3' },
-      ];
-    });
-    const evidenceSwapped = with_(evidenceSwap, (r) => {
-      ((r['evidence'] as Json)['supportingEvidence'] as Json[]).reverse();
-    });
-    const outcomes = polluted(
-      Object.prototype,
-      'toJSON',
-      { value: toJSON, writable: true },
-      () => [
-        capture(() => run([a, b])),
-        capture(() => run([b, a])),
-        capture(() => run([evidenceSwap, evidenceSwapped])),
-        capture(() => run([evidenceSwapped, evidenceSwap])),
-      ],
-    );
-    expect(toJSON).not.toHaveBeenCalled();
     for (const outcome of outcomes)
-      expect(text(outcome)).toBe(expected('conflicting_duplicate'));
+      expect(text(outcome)).toBe(expected('invalid_input'));
   });
 
-  it('keeps valid and identical-duplicate intake unchanged under an inherited toJSON', () => {
-    const toJSON = vi.fn(() => 'COLLISION');
-    const records = () => [procedure(), durable(), durable(), activeTask()];
-    const clean = cleanText(records());
-    const reordered = () => [
-      Object.fromEntries(Object.entries(durable()).reverse()),
-      procedure(),
-      activeTask(),
-    ];
-    const [outcome, collapsed] = polluted(
-      Object.prototype,
-      'toJSON',
-      { value: toJSON, writable: true },
-      () => [capture(() => run(records())), capture(() => run(reordered()))],
-    );
-    expect(toJSON).not.toHaveBeenCalled();
-    expect(text(outcome!)).toBe(clean);
-    expect(text(collapsed!)).toBe(clean);
-  });
-
-  it('ignores unrelated inherited data, constructor and prototype pollution', () => {
-    const records = () => [procedure(), durable(), activeTask()];
-    const clean = cleanText(records());
-    const hooks: ReturnType<typeof vi.fn>[] = [];
-    const counted = (value: unknown) => {
-      const hook = vi.fn(() => value);
-      hooks.push(hook);
-      return hook;
+  it('constructs and serializes OwnerModelError without invoking any inherited hook', () => {
+    const hooks = {
+      toJSON: counted(() => 'COLLISION'),
+      message: counted(() => 'PRIVATE_SENTINEL'),
+      code: counted(() => 'PRIVATE_SENTINEL'),
+      get: counted(() => 'PRIVATE_SENTINEL'),
+      set: counted(() => 'PRIVATE_SENTINEL'),
     };
-    const outcomes = [
-      polluted(
-        Object.prototype,
-        'syntheticUnrelated',
-        { value: 'X', writable: true, enumerable: true },
-        () => capture(() => run(records())),
-      ),
-      polluted(Object.prototype, 'constructor', { get: counted(Object) }, () =>
-        capture(() => run(records())),
-      ),
-      polluted(Array.prototype, 'constructor', { get: counted(Array) }, () =>
-        capture(() => run(records())),
-      ),
-      polluted(
-        Object.prototype,
-        'prototype',
-        { value: { kind: 'global' }, writable: true, enumerable: true },
-        () => capture(() => run(records())),
-      ),
-    ];
-    for (const hook of hooks) expect(hook).not.toHaveBeenCalled();
-    for (const outcome of outcomes) expect(text(outcome)).toBe(clean);
-  });
-
-  it('defines properties and errors correctly when descriptor fields are inherited', () => {
-    const records = () => [procedure(), durable()];
-    const clean = cleanText(records());
-    const get = vi.fn(() => 'INHERITED');
-    const outcomes = polluted(
-      Object.prototype,
-      'get',
-      { value: get, writable: true },
-      () =>
-        polluted(
-          Object.prototype,
-          'set',
-          { value: get, writable: true },
-          () => [
-            capture(() => run(records())),
-            capture(() =>
-              run([
-                with_(
-                  durable(),
-                  (r) => ((r['metadata'] as Json)['recordVersion'] = 0),
-                ),
-              ]),
-            ),
-          ],
-        ),
-    );
-    expect(get).not.toHaveBeenCalled();
-    expect(text(outcomes[0]!)).toBe(clean);
-    expect(outcomes[1]!.ok).toBe(false);
-    expect(text(outcomes[1]!)).toBe(expected('invalid_input'));
-  });
-
-  it('collapses equivalent caller shapes and still separates real differences under pollution', () => {
-    const toJSON = vi.fn(() => 'COLLISION');
-    const plain = durable({ category: 'procedure' });
-    const nullProto = Object.assign(
-      Object.create(null) as Json,
-      structuredClone(plain),
-    );
-    const nestedReordered = with_(plain, (r) => {
-      r['metadata'] = Object.fromEntries(
-        Object.entries(r['metadata'] as Json).reverse(),
-      );
-    });
-    const explicitUndefined = with_(
-      plain,
-      (r) => ((r['scope'] as Json)['taskType'] = undefined),
-    );
-    const stepsReversed = with_(plain, (r) =>
-      ((r['content'] as Json)['steps'] as Json[]).reverse(),
-    );
-    const timestampText = with_(
-      plain,
-      (r) =>
-        ((r['metadata'] as Json)['createdAt'] = '2026-10-01T09:00:00.000Z'),
-    );
-    const [same, steps, stamp] = polluted(
+    const serialized = polluted(
       Object.prototype,
       'toJSON',
-      { value: toJSON, writable: true },
-      () => [
-        capture(() =>
-          run([plain, nullProto, nestedReordered, explicitUndefined]),
+      { value: hooks.toJSON, writable: true },
+      () =>
+        polluted(Object.prototype, 'message', { get: hooks.message }, () =>
+          polluted(Object.prototype, 'code', { get: hooks.code }, () =>
+            polluted(
+              Object.prototype,
+              'get',
+              { value: hooks.get, writable: true },
+              () =>
+                polluted(
+                  Object.prototype,
+                  'set',
+                  { value: hooks.set, writable: true },
+                  () => {
+                    const outcome = capture(() => run([durable()]));
+                    const error = outcome.ok ? undefined : outcome.error;
+                    const direct = new OwnerModelError('identity_conflict');
+                    return {
+                      isError: error instanceof OwnerModelError,
+                      thrown: JSON.stringify(error),
+                      json:
+                        error instanceof OwnerModelError
+                          ? JSON.stringify(error.toJSON())
+                          : 'accepted or foreign error',
+                      direct: JSON.stringify(direct),
+                    };
+                  },
+                ),
+            ),
+          ),
         ),
-        capture(() => run([plain, stepsReversed])),
-        capture(() => run([plain, timestampText])),
-      ],
     );
-    expect(toJSON).not.toHaveBeenCalled();
-    expect(text(same!)).toBe(cleanText([plain]));
-    expect(text(steps!)).toBe(expected('conflicting_duplicate'));
-    expect(text(stamp!)).toBe(expected('conflicting_duplicate'));
+    for (const hook of Object.values(hooks))
+      expect(hook).not.toHaveBeenCalled();
+    expect(serialized.isError).toBe(true);
+    expect(serialized.thrown).toBe(expected('invalid_input'));
+    expect(serialized.json).toBe(expected('invalid_input'));
+    expect(serialized.direct).toBe(expected('identity_conflict'));
   });
 
   it('returns null-prototype records, so absent fields never resolve through Object.prototype', () => {
@@ -1551,6 +1594,67 @@ describe('AVEN-009 intake: own data only under ambient prototype pollution (H1)'
       expect(Object.getPrototypeOf(value)).toBeNull();
     expect(Object.getPrototypeOf(result.durable)).toBe(Array.prototype);
     expect(deeplyFrozen(result)).toBe(true);
+  });
+});
+
+describe('AVEN-009 canonical own-data serializer (independent of the gate)', () => {
+  afterEach(() => {
+    expect(prototypeState()).toEqual(PRISTINE);
+  });
+
+  it('never consults an inherited toJSON or inherited enumerable data', () => {
+    const objectHook = counted(() => 'COLLISION');
+    const arrayHook = counted(() => 'COLLISION');
+    const texts = polluted(
+      Object.prototype,
+      'toJSON',
+      { value: objectHook, writable: true },
+      () =>
+        polluted(
+          Array.prototype,
+          'toJSON',
+          { value: arrayHook, writable: true },
+          () =>
+            polluted(
+              Object.prototype,
+              'inherited',
+              { value: 'INHERITED', writable: true, enumerable: true },
+              () => [
+                canonicalText({
+                  steps: [{ instruction: 'a' }, { instruction: 'b' }],
+                }),
+                canonicalText({
+                  steps: [{ instruction: 'b' }, { instruction: 'a' }],
+                }),
+                canonicalText({ b: [1, 2], a: { y: 'x', x: null } }),
+                canonicalText({ a: { x: null, y: 'x' }, b: [1, 2] }),
+                canonicalText(
+                  Object.assign(Object.create(null) as Json, { a: 'A' }),
+                ),
+                canonicalText({ a: 'A' }),
+              ],
+            ),
+        ),
+    );
+    expect(objectHook).not.toHaveBeenCalled();
+    expect(arrayHook).not.toHaveBeenCalled();
+    expect(texts[0]).toBe(
+      '{"steps":[{"instruction":"a"},{"instruction":"b"}]}',
+    );
+    expect(texts[1]).not.toBe(texts[0]);
+    expect(texts[2]).toBe('{"a":{"x":null,"y":"x"},"b":[1,2]}');
+    expect(texts[3]).toBe(texts[2]);
+    expect(texts[4]).toBe('{"a":"A"}');
+    expect(texts[5]).toBe(texts[4]);
+  });
+
+  it('distinguishes values that ordinary serialization would collapse', () => {
+    expect(canonicalText([1, 2])).not.toBe(canonicalText([2, 1]));
+    expect(canonicalText({ t: '2026-10-01T09:00:00Z' })).not.toBe(
+      canonicalText({ t: '2026-10-01T09:00:00.000Z' }),
+    );
+    expect(() => canonicalText({ n: Number.NaN })).toThrow();
+    expect(() => canonicalText({ f: () => 1 })).toThrow();
   });
 });
 
