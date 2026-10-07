@@ -68,7 +68,19 @@ export class OwnerModelError extends Error {
     Object.freeze(this);
   }
 
+  /**
+   * A frozen null-prototype object, so serializing it can never reach an
+   * inherited `toJSON` or accessor on Object.prototype.
+   */
   toJSON(): SerializedOwnerModelError {
-    return { name: this.name, code: this.code, message: this.message };
+    const json = Object.create(null) as {
+      name: 'OwnerModelError';
+      code: OwnerModelErrorCode;
+      message: string;
+    };
+    json.name = this.name;
+    json.code = this.code;
+    json.message = this.message;
+    return Object.freeze(json);
   }
 }

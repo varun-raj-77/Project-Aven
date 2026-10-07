@@ -512,6 +512,8 @@ describe('AVEN-009 owner-model public surface (scaffold only)', () => {
 describe('AVEN-009 owner-model static regression tripwires (not runtime security)', () => {
   it('keeps production modules in a known, reviewed set with no later-patch modules', () => {
     expect(files.sort()).toEqual([
+      'ambient.ts',
+      'canonical-text.ts',
       'config.ts',
       'errors.ts',
       'index.ts',
@@ -571,6 +573,13 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     expect(violations(rule, `const parts = text.match(TIMESTAMP);`)).toEqual(
       [],
     );
+  });
+
+  it('confines JSON.stringify to the own-data canonical serializer', () => {
+    const users = Object.keys(source).filter((f) =>
+      /JSON\s*\.\s*stringify/.test(source[f]!),
+    );
+    expect(users).toEqual(['canonical-text.ts']);
   });
 
   it('allows an explicit timestamp argument, which is not a hidden clock', () => {
