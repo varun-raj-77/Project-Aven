@@ -46,6 +46,11 @@ const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'OwnerId',
     // Patch 3: the frozen learned-item ID type, for durable lineage nodes.
     'LearnedItemId',
+    // Patch 4: the frozen recorded-transition union and reference types.
+    'LearningTransitionSchema',
+    'LearningTransition',
+    'LearnedItemReference',
+    'EventId',
   ]),
 };
 
@@ -129,8 +134,16 @@ const RULES: Record<string, RegExp[]> = {
     /reasoning|chainOfThought|chain_of_thought|\bthoughts?\b|rationale|scratchpad/i,
   ],
 };
+/**
+ * Removes the frozen contract names Patch 4 must read to find a promotion
+ * claim (the trusted lifecycle pointer and the transition kind). They name
+ * recorded data; nothing here promotes.
+ */
+const withoutPromotionContractNames = (text: string) =>
+  text.replaceAll('promotionEventId', '').replaceAll('learning_promotion', '');
 const ruleText: Record<string, (text: string) => string> = {
   'AVEN-010 correction semantics': withoutProvenanceKinds,
+  'learning, promotion or trust decision': withoutPromotionContractNames,
 };
 function violations(rule: string, text: string): string[] {
   const prepared = (ruleText[rule] ?? ((t: string) => t))(text);
@@ -196,6 +209,10 @@ const KNOWN_BAD: Record<string, string[]> = {
     `const next = { ...item, lifecycle: { status: 'trusted' } };`,
     `markTrusted(item)`,
     `const p = inferPreference(history);`,
+    // The frozen-name exemption is exact: other promotion code still trips.
+    `applyPromotion(record, learning_promotion);`,
+    `const promotionEventIds = promoteAll(records);`,
+    `if (t.kind === 'learning_rollback') restore(t.restore);`,
   ],
   'authority, approval, Root or tools': [
     `return { decision: 'ALLOW' };`,
@@ -278,7 +295,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
@@ -287,6 +304,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       'version_order_conflict',
       'invalid_lineage_reference',
       'lineage_cycle',
+      'invalid_lifecycle_claim',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -307,6 +325,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
       lineage_cycle:
         'Owner-state lineage references form a cycle; no lineage was built',
+      invalid_lifecycle_claim:
+        'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -522,6 +542,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     expect(files.sort()).toEqual([
       'ambient.ts',
       'canonical-text.ts',
+      'claims.ts',
       'config.ts',
       'errors.ts',
       'index.ts',
@@ -529,7 +550,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'lineage.ts',
     ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
-    for (const later of ['claims.ts', 'views.ts', 'active-task.ts'])
+    for (const later of ['views.ts', 'active-task.ts'])
       expect(files, later).not.toContain(later);
   });
 
@@ -585,6 +606,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     );
     expect(tests.sort()).toEqual([
       'boundaries.test.ts',
+      'claims.test.ts',
       'fresh-process.test.ts',
       'intake.test.ts',
       'lineage.test.ts',
@@ -618,6 +640,83 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
         if (to) { visit(to); }
       }`),
     ).toEqual(['visit']);
+  });
+
+  it('keeps lifecycle-claim verification read-only: no in-force selection, Root conclusion or transition application', () => {
+    // Patch 4 checks that recorded transitions AGREE with lifecycle claims.
+    // Views (which version applies) are Patch 5; Root authenticity is never
+    // concluded here; rejection and rollback records are never applied.
+    const PATCH_4_SCOPE: Record<string, RegExp> = {
+      'in-force selection (Patch 5)':
+        /current|effective|selected|\bselect\w*|winner|winning|\bbest\w*|latest|newest|inForce|\bactive\b/i,
+      'Root or policy authority conclusion':
+        /\.authority\b|\bauthority\s*[:=]|authenticat|rootApproved|verifiedBy|\bdecision\b|policyDecision/i,
+      'transition application':
+        /learning_rollback|learning_rejection|rejectionEventId|revocationEventId|\brestore\b|previousTrustedState|\bapply\w*/i,
+    };
+    const claimsCode = source['claims.ts']!;
+    for (const [label, pattern] of Object.entries(PATCH_4_SCOPE))
+      expect(pattern.test(claimsCode), label).toBe(false);
+    for (const [label, bad] of [
+      ['in-force selection (Patch 5)', `verified.current = claims.at(-1);`],
+      ['in-force selection (Patch 5)', `const effective = byEvent.get(id);`],
+      ['in-force selection (Patch 5)', `const bestVersion = pick(history);`],
+      ['in-force selection (Patch 5)', `history.latestUsable = record;`],
+      ['in-force selection (Patch 5)', `const winner = versions[0];`],
+      [
+        'Root or policy authority conclusion',
+        `if (transition.authority.decisionId) ok = true;`,
+      ],
+      [
+        'Root or policy authority conclusion',
+        `trace.authority = transition.authority;`,
+      ],
+      ['Root or policy authority conclusion', `verified.rootApproved = true;`],
+      ['Root or policy authority conclusion', `claim.authenticated = true;`],
+      [
+        'transition application',
+        `if (t.kind === 'learning_rollback') drop(t.from);`,
+      ],
+      [
+        'transition application',
+        `if (t.kind === 'learning_rejection') remove(t);`,
+      ],
+      ['transition application', `const restored = restore(t);`],
+      ['transition application', `applyTransition(record, t);`],
+    ] as const)
+      expect(PATCH_4_SCOPE[label]!.test(bad), bad).toBe(true);
+  });
+
+  it('indexes recorded transitions once and never scans them per claim', () => {
+    // The validated transition array is traversed exactly once, to build the
+    // exact-event index; claims then resolve by Map lookup only.
+    const claimsCode = source['claims.ts']!;
+    const scans = (text: string) => [
+      (text.match(/\brecorded\b/g) ?? []).length !== 2,
+      /\.(find|findLast|findIndex|filter|some|every|indexOf|lastIndexOf|includes|reduce)\s*\(/.test(
+        text,
+      ),
+      /\bbyEvent\s*\.\s*(values|entries|keys|forEach)\b/.test(text),
+    ];
+    expect(scans(claimsCode)).toEqual([false, false, false]);
+    expect(
+      scans(
+        claimsCode.replace(
+          'byEvent.get(claim.eventId)',
+          'recorded.find((t) => t.eventId === claim.eventId)',
+        ),
+      ).some(Boolean),
+    ).toBe(true);
+    expect(
+      scans(
+        `const recorded = all(); for (const t of recorded) index(t); for (const t of recorded) if (t.eventId === id) hit = t;`,
+      ).some(Boolean),
+    ).toBe(true);
+    expect(
+      scans(
+        `for (const t of byEvent.values()) if (t.eventId === id) hit = t;`,
+      ).some(Boolean),
+    ).toBe(true);
   });
 
   it('keeps durable lineage structural: no lifecycle-claim checks and no in-force selection (later-patch scope)', () => {

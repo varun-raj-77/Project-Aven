@@ -11,8 +11,9 @@
  *
  * The code set is deliberately minimal. Later AVEN-009 patches add codes only
  * when their own behavior needs them. Patch 2 (owner-state intake) adds the
- * three identity codes and Patch 3 (durable lineage) adds two lineage codes;
- * none carries a position, ID, version, category, path, count or owner.
+ * three identity codes, Patch 3 (durable lineage) adds two lineage codes and
+ * Patch 4 (lifecycle claims) adds one claim code; none carries a position,
+ * ID, version, category, path, count, event, transition kind or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
@@ -21,7 +22,8 @@ export type OwnerModelErrorCode =
   | 'identity_conflict'
   | 'version_order_conflict'
   | 'invalid_lineage_reference'
-  | 'lineage_cycle';
+  | 'lineage_cycle'
+  | 'invalid_lifecycle_claim';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -37,6 +39,8 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
   lineage_cycle:
     'Owner-state lineage references form a cycle; no lineage was built',
+  invalid_lifecycle_claim:
+    'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -56,6 +60,7 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'version_order_conflict') return 'version_order_conflict';
   if (value === 'invalid_lineage_reference') return 'invalid_lineage_reference';
   if (value === 'lineage_cycle') return 'lineage_cycle';
+  if (value === 'invalid_lifecycle_claim') return 'invalid_lifecycle_claim';
   return 'internal_error';
 }
 
