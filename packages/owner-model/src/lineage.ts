@@ -94,6 +94,18 @@ export interface DurableLineage {
   readonly edges: readonly LineageEdge[];
 }
 
+/**
+ * Results this module produced (Patch 4). Membership is checked by object
+ * identity only, so a copy, clone, Proxy or look-alike is never recognized
+ * and no field is read to decide. Entries are weakly held.
+ */
+const PRODUCED = new WeakSet<object>();
+
+/** Whether `value` is a lineage produced by `buildDurableLineage` (internal). */
+export function isDurableLineage(value: unknown): value is DurableLineage {
+  return value !== null && typeof value === 'object' && PRODUCED.has(value);
+}
+
 /* Internal failure tokens, compared by identity only. */
 const REJECT = Object.freeze({ token: 'reject' });
 const REFERENCE = Object.freeze({ token: 'reference' });
@@ -275,7 +287,8 @@ export function buildDurableLineage(intake: OwnerStateIntake): DurableLineage {
     lineage.ownerId = intake.ownerId;
     lineage.histories = Object.freeze(histories);
     lineage.edges = Object.freeze(edges);
-    return Object.freeze(lineage);
+    PRODUCED.add(Object.freeze(lineage));
+    return lineage;
   } catch (thrown) {
     throw new OwnerModelError(
       thrown !== null && typeof thrown === 'object'

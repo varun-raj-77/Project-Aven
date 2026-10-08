@@ -49,6 +49,8 @@ const MESSAGES: Record<OwnerModelErrorCode, string> = {
     'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
   lineage_cycle:
     'Owner-state lineage references form a cycle; no lineage was built',
+  invalid_lifecycle_claim:
+    'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
 };
 
 /** The public error a failing intake throws, serialized. */
