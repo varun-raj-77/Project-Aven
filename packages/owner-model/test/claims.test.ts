@@ -378,7 +378,12 @@ describe('AVEN-009 lifecycle claims: input boundary', () => {
 
   it.each([
     ['an unknown key', { ...TRANSITIONS[0], extra: 'field' }],
-    ['a missing field', { ...TRANSITIONS[0], candidate: undefined }],
+    [
+      'a missing field',
+      Object.fromEntries(
+        Object.entries(TRANSITIONS[0]!).filter(([k]) => k !== 'candidate'),
+      ),
+    ],
     ['an unknown kind', { ...TRANSITIONS[0], kind: 'learning_applied' }],
     [
       'a non-ALLOW authority',
@@ -387,7 +392,6 @@ describe('AVEN-009 lifecycle claims: input boundary', () => {
     ['a malformed timestamp', { ...TRANSITIONS[0], occurredAt: 'yesterday' }],
     ['a primitive', 42],
     ['null', null],
-    ['a hole', undefined],
   ])(
     'fails closed on a malformed transition (%s), never repairing it',
     (_label, bad) => {
@@ -398,17 +402,6 @@ describe('AVEN-009 lifecycle claims: input boundary', () => {
         rejects([observed('learned_e')], [foreignOwned(bad as Json)]);
     },
   );
-
-  it('fails closed on a transition whose field getter throws', () => {
-    const hostile = { ...TRANSITIONS[0] };
-    Object.defineProperty(hostile, 'candidate', {
-      enumerable: true,
-      get() {
-        throw new Error('PRIVATE_SENTINEL');
-      },
-    });
-    rejects(RECORDS, [hostile, ...TRANSITIONS.slice(1)]);
-  });
 });
 
 describe('AVEN-009 lifecycle claims: observed and validated', () => {
@@ -624,22 +617,6 @@ describe('AVEN-009 lifecycle claims: superseded <-> supersession', () => {
       'a replacement other than the Patch-3 edge target (ID)',
       [supersession('event_sup_b1', ref('learned_b', 1), ref('learned_g', 2))],
     ],
-    [
-      'a different time',
-      [
-        supersession('event_sup_b1', ref('learned_b', 1), ref('learned_b', 2), {
-          occurredAt: T2,
-        }),
-      ],
-    ],
-    [
-      'the same instant spelled differently (stored text must agree)',
-      [
-        supersession('event_sup_b1', ref('learned_b', 1), ref('learned_b', 2), {
-          occurredAt: '2026-10-02T10:00:00+01:00',
-        }),
-      ],
-    ],
     ['an identical duplicate (event IDs are unique)', [good, { ...good }]],
   ])('rejects %s', (_label, transitions) => {
     rejects(records, transitions);
@@ -755,24 +732,6 @@ describe('AVEN-009 lifecycle claims: revoked <-> revocation', () => {
       'a lifecycle fallback the transition does not declare',
       withFallback,
       [revocation('event_rev_c2', ref('learned_c', 2))],
-    ],
-    [
-      'a different time',
-      withFallback,
-      [
-        revocation('event_rev_c2', ref('learned_c', 2), ref('learned_c', 1), {
-          occurredAt: T3,
-        }),
-      ],
-    ],
-    [
-      'the same instant spelled differently',
-      noFallback,
-      [
-        revocation('event_rev_d1', ref('learned_d', 1), undefined, {
-          occurredAt: '2026-10-03T09:00:00.000Z',
-        }),
-      ],
     ],
     ['an identical duplicate', noFallback, [goodWithout, { ...goodWithout }]],
   ])('rejects %s', (_label, records, transitions) => {
@@ -1084,6 +1043,327 @@ describe('AVEN-009 lifecycle claims: verified-result brand', () => {
     expect(isVerifiedDurableLineage(real)).toBe(true);
     expect(isVerifiedDurableLineage(real.lineage)).toBe(false);
     expect(isDurableLineage(real)).toBe(false);
+  });
+});
+
+describe('AVEN-009 lifecycle claims: timestamps are not compared', () => {
+  // No frozen contract, constraint or document equates a transition's
+  // occurredAt with a snapshot's supersededAt or revokedAt (independent
+  // TimestampSchema fields), so Patch 4 compares neither, as text or instant.
+  const DISTANT = '2031-01-15T23:59:59+05:30';
+
+  it('verifies a supersession whose occurredAt differs from supersededAt', () => {
+    const records = [
+      superseded('learned_b', 1, ref('learned_b', 2), 'event_sup_b1', T1),
+      observed('learned_b', 2),
+    ];
+    for (const occurredAt of [DISTANT, T0, T3, '2026-10-02T10:00:00+01:00'])
+      expect(
+        trace(
+          verify(records, [
+            supersession(
+              'event_sup_b1',
+              ref('learned_b', 1),
+              ref('learned_b', 2),
+              { occurredAt },
+            ),
+          ]),
+        ),
+      ).toEqual(['superseded learned_b@1 event_sup_b1']);
+  });
+
+  it('verifies a revocation whose occurredAt differs from revokedAt', () => {
+    const records = [
+      observed('learned_c', 1),
+      revoked('learned_c', 2, 'event_rev_c2', ref('learned_c', 1), {
+        revokedAt: T2,
+      }),
+    ];
+    for (const occurredAt of [DISTANT, T0, '2026-10-03T09:00:00.000Z'])
+      expect(
+        trace(
+          verify(records, [
+            revocation(
+              'event_rev_c2',
+              ref('learned_c', 2),
+              ref('learned_c', 1),
+              {
+                occurredAt,
+              },
+            ),
+          ]),
+        ),
+      ).toEqual(['revoked learned_c@2 event_rev_c2']);
+  });
+
+  it('still rejects every duplicated claim when only the timestamps differ', () => {
+    rejects(
+      [
+        superseded('learned_b', 1, ref('learned_b', 2), 'event_sup_b1'),
+        observed('learned_b', 2),
+        observed('learned_b', 3),
+      ],
+      [
+        supersession('event_sup_b1', ref('learned_b', 1), ref('learned_b', 3), {
+          occurredAt: DISTANT,
+        }),
+      ],
+    );
+    rejects(
+      [revoked('learned_d', 1, 'event_rev_d1')],
+      [
+        revocation('event_rev_d1', ref('learned_d', 1), undefined, {
+          occurredAt: DISTANT,
+          reason: 'Another synthetic reason',
+        }),
+      ],
+    );
+  });
+});
+
+describe('AVEN-009 lifecycle claims: inert transition snapshot', () => {
+  const INPUT_ERROR = expected('invalid_input');
+  /** Runs the full scenario with transition 0 (the promotion) replaced. */
+  function withPromotion(promotionValue: unknown): string {
+    const lineage = lineageOf(RECORDS);
+    try {
+      verifyLifecycleClaims(lineage, [promotionValue, ...TRANSITIONS.slice(1)]);
+      return 'accepted';
+    } catch (error) {
+      expect(error).toBeInstanceOf(OwnerModelError);
+      const text = JSON.stringify(error);
+      expect(text).not.toContain('PRIVATE_SENTINEL');
+      return text;
+    }
+  }
+  const plain = () => structuredClone(TRANSITIONS[0]!) as Json;
+
+  it('accepts null-prototype plain-data transitions, nested too', () => {
+    const toNullProto = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(toNullProto);
+      if (value === null || typeof value !== 'object') return value;
+      const copy = Object.create(null) as Json;
+      for (const [k, v] of Object.entries(value)) copy[k] = toNullProto(v);
+      return copy;
+    };
+    expect(
+      trace(verify(RECORDS, TRANSITIONS.map(toNullProto) as unknown[])),
+    ).toEqual(FULL_TRACE);
+  });
+
+  it.each([
+    ['a required field', (t: Json) => t, 'eventId', 'event_pro_a1'],
+    [
+      'a nested field',
+      (t: Json) => t['candidate'] as Json,
+      'candidateId',
+      'candidate_s1',
+    ],
+    [
+      'an array element',
+      (t: Json) => t['evaluations'] as Json,
+      '0',
+      EVALUATIONS[0],
+    ],
+  ])(
+    'rejects a getter on %s with invalid_input without running it',
+    (_label, holder, key, value) => {
+      const transition = plain();
+      let calls = 0;
+      Object.defineProperty(holder(transition), key, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          calls += 1;
+          return value;
+        },
+      });
+      expect(withPromotion(transition)).toBe(INPUT_ERROR);
+      expect(calls).toBe(0);
+    },
+  );
+
+  it('rejects a throwing getter without running it or leaking its text', () => {
+    const transition = plain();
+    let calls = 0;
+    Object.defineProperty(transition, 'candidate', {
+      enumerable: true,
+      get() {
+        calls += 1;
+        throw new Error('PRIVATE_SENTINEL');
+      },
+    });
+    expect(withPromotion(transition)).toBe(INPUT_ERROR);
+    expect(calls).toBe(0);
+  });
+
+  it('rejects a setter-only property without running it', () => {
+    const transition = plain();
+    let calls = 0;
+    Object.defineProperty(transition, 'reason', {
+      enumerable: true,
+      set() {
+        calls += 1;
+      },
+    });
+    expect(withPromotion(transition)).toBe(INPUT_ERROR);
+    expect(calls).toBe(0);
+  });
+
+  it('rejects a Proxy around an otherwise valid transition, top-level or nested', () => {
+    expect(withPromotion(new Proxy(plain(), {}))).toBe(INPUT_ERROR);
+    const nested = plain();
+    nested['candidate'] = new Proxy({ ...CANDIDATE }, {});
+    expect(withPromotion(nested)).toBe(INPUT_ERROR);
+    const inArray = plain();
+    inArray['evaluations'] = new Proxy([...EVALUATIONS], {});
+    expect(withPromotion(inArray)).toBe(INPUT_ERROR);
+  });
+
+  it.each([
+    'getPrototypeOf',
+    'ownKeys',
+    'getOwnPropertyDescriptor',
+    'get',
+  ] as const)(
+    'rejects a Proxy whose %s trap throws, without leaking it',
+    (trap) => {
+      const handler: ProxyHandler<object> = {
+        [trap]: () => {
+          throw new Error('PRIVATE_SENTINEL');
+        },
+      };
+      expect(withPromotion(new Proxy(plain(), handler))).toBe(INPUT_ERROR);
+    },
+  );
+
+  it('rejects inherited contract fields and inherited toJSON', () => {
+    const { candidate, ...rest } = plain();
+    const inheritsField = Object.assign(Object.create({ candidate }), rest);
+    expect(withPromotion(inheritsField)).toBe(INPUT_ERROR);
+    let calls = 0;
+    const inheritsToJSON = Object.assign(
+      Object.create({
+        toJSON() {
+          calls += 1;
+          return TRANSITIONS[0];
+        },
+      }),
+      plain(),
+    );
+    expect(withPromotion(inheritsToJSON)).toBe(INPUT_ERROR);
+    expect(calls).toBe(0);
+  });
+
+  it('rejects a class instance carrying transition-shaped properties', () => {
+    class Recorded {
+      constructor(fields: Json) {
+        Object.assign(this, fields);
+      }
+    }
+    expect(withPromotion(new Recorded(plain()))).toBe(INPUT_ERROR);
+  });
+
+  it.each([
+    ['a symbol key', () => Object.assign(plain(), { [Symbol('x')]: 1 })],
+    [
+      'a non-enumerable data field',
+      () =>
+        Object.defineProperty(plain(), 'reason', {
+          value: 'Synthetic',
+          enumerable: false,
+        }),
+    ],
+    [
+      'a sparse array',
+      () => {
+        const t = plain();
+        const sparse = [EVALUATIONS[0]];
+        sparse[2] = EVALUATIONS[1];
+        t['evaluations'] = sparse;
+        return t;
+      },
+    ],
+    [
+      'an array with an extra property',
+      () => {
+        const t = plain();
+        t['evaluations'] = Object.assign([...EVALUATIONS], { extra: 1 });
+        return t;
+      },
+    ],
+    [
+      'an array subclass',
+      () => {
+        class Listed extends Array {}
+        const t = plain();
+        t['evaluations'] = Listed.from(EVALUATIONS);
+        return t;
+      },
+    ],
+    [
+      'a cycle',
+      () => {
+        const t = plain();
+        (t['candidate'] as Json)['self'] = t;
+        return t;
+      },
+    ],
+    ['an undefined field value', () => ({ ...plain(), reason: undefined })],
+    ['a Date value', () => ({ ...plain(), occurredAt: new Date(0) })],
+    ['a function value', () => ({ ...plain(), reason: () => 'x' })],
+    ['a hole in the transition array', () => undefined],
+  ])('rejects %s with invalid_input', (_label, build) => {
+    expect(withPromotion(build())).toBe(INPUT_ERROR);
+  });
+
+  it('keeps a schema verdict that no caller code can influence', () => {
+    // An otherwise-invalid transition (bad event ID) whose getters would,
+    // if executed during validation, make the schema's pattern checks pass
+    // and then put them back before any later check. The snapshot never
+    // runs them, so the transition stays rejected.
+    const test = RegExp.prototype.test;
+    let calls = 0;
+    const invalid = plain();
+    invalid['eventId'] = 'not an event id';
+    Object.defineProperty(invalid, 'ownerId', {
+      enumerable: true,
+      get() {
+        calls += 1;
+        RegExp.prototype.test = () => true;
+        return OWNER;
+      },
+    });
+    Object.defineProperty(invalid, 'occurredAt', {
+      enumerable: true,
+      get() {
+        calls += 1;
+        RegExp.prototype.test = test;
+        return T1;
+      },
+    });
+    let outcome: string;
+    try {
+      outcome = withPromotion(invalid);
+    } finally {
+      RegExp.prototype.test = test;
+    }
+    expect(outcome).toBe(INPUT_ERROR);
+    expect(calls).toBe(0);
+    // The same invalid transition as inert data is schema-rejected.
+    expect(withPromotion({ ...plain(), eventId: 'not an event id' })).toBe(
+      CLAIM_ERROR,
+    );
+  });
+
+  it('never mutates or freezes the caller transition objects', () => {
+    const transitions = structuredClone(TRANSITIONS);
+    const proxied = new Proxy(structuredClone(TRANSITIONS[0]!), {});
+    const before = JSON.stringify(transitions);
+    withPromotion(proxied);
+    verify(RECORDS, transitions);
+    expect(JSON.stringify(transitions)).toBe(before);
+    for (const t of transitions) expect(Object.isFrozen(t)).toBe(false);
   });
 });
 
