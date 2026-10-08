@@ -45,6 +45,10 @@ const MESSAGES: Record<OwnerModelErrorCode, string> = {
     'An owner-state identity changes record kind or category across versions; no owner state was read',
   version_order_conflict:
     'An owner-state creation time moves backwards as its version increases; no owner state was read',
+  invalid_lineage_reference:
+    'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
+  lineage_cycle:
+    'Owner-state lineage references form a cycle; no lineage was built',
 };
 
 /** The public error a failing intake throws, serialized. */

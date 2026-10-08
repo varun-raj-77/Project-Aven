@@ -44,6 +44,8 @@ const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'ActiveTaskState',
     'DurableOwnerState',
     'OwnerId',
+    // Patch 3: the frozen learned-item ID type, for durable lineage nodes.
+    'LearnedItemId',
   ]),
 };
 
@@ -276,13 +278,15 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
       'conflicting_duplicate',
       'identity_conflict',
       'version_order_conflict',
+      'invalid_lineage_reference',
+      'lineage_cycle',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -299,6 +303,10 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'An owner-state identity changes record kind or category across versions; no owner state was read',
       version_order_conflict:
         'An owner-state creation time moves backwards as its version increases; no owner state was read',
+      invalid_lineage_reference:
+        'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
+      lineage_cycle:
+        'Owner-state lineage references form a cycle; no lineage was built',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -518,14 +526,10 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'errors.ts',
       'index.ts',
       'intake.ts',
+      'lineage.ts',
     ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
-    for (const later of [
-      'lineage.ts',
-      'claims.ts',
-      'views.ts',
-      'active-task.ts',
-    ])
+    for (const later of ['claims.ts', 'views.ts', 'active-task.ts'])
       expect(files, later).not.toContain(later);
   });
 
@@ -583,7 +587,72 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'boundaries.test.ts',
       'fresh-process.test.ts',
       'intake.test.ts',
+      'lineage.test.ts',
     ]);
+  });
+
+  it('keeps lineage functions non-recursive, so long chains cannot overflow the stack', () => {
+    /** Names of declared functions whose own body calls them by name. */
+    function selfRecursive(text: string): string[] {
+      const found: string[] = [];
+      for (const m of text.matchAll(/function\s+(\w+)\s*(?:<[^>]*>)?\(/g)) {
+        const name = m[1]!;
+        const open = text.indexOf('{', m.index + m[0].length);
+        let depth = 0;
+        let end = open;
+        for (; end < text.length; end += 1) {
+          if (text[end] === '{') depth += 1;
+          else if (text[end] === '}' && --depth === 0) break;
+        }
+        const body = text.slice(open + 1, end);
+        if (new RegExp(`\\b${name}\\s*\\(`).test(body)) found.push(name);
+      }
+      return found;
+    }
+    expect(selfRecursive(source['lineage.ts']!)).toEqual([]);
+    expect(
+      selfRecursive(`function visit(at: Node): void {
+        if (seen.has(at)) return;
+        seen.add(at);
+        const to = next.get(at);
+        if (to) { visit(to); }
+      }`),
+    ).toEqual(['visit']);
+  });
+
+  it('keeps durable lineage structural: no lifecycle-claim checks and no in-force selection (later-patch scope)', () => {
+    // Patch 3 reads lifecycle status only to find the structural reference
+    // field. Claim agreement (event IDs, timestamps, reasons, evaluations,
+    // candidates) and any notion of which version applies are later patches.
+    const LATER_PATCH_SCOPE = [
+      /\b(eventId|promotionEventId|evaluations|candidate\w*|supersededAt|revokedAt|reason|lastValidatedAt)\b/,
+      /current|effective|winner|winning|selected|\bselect\w*|\bactive\b|\bactiveTasks\b|inForce|latest|newest|nearest/i,
+    ];
+    const lineageCode = source['lineage.ts']!;
+    expect(
+      LATER_PATCH_SCOPE.filter((p) => p.test(lineageCode)).map(String),
+    ).toEqual([]);
+    for (const bad of [
+      `if (source.lifecycle.eventId !== target.eventId) throw REFERENCE;`,
+      `const ok = lifecycle.promotionEventId === undefined;`,
+      `if (lifecycle.evaluations.length === 0) return;`,
+      `if (lifecycle.supersededAt < target.metadata.createdAt) throw CYCLE;`,
+      `const at = lifecycle.revokedAt;`,
+      `if (lifecycle.reason === '') throw REJECT;`,
+      `const v = lifecycle.lastValidatedAt;`,
+      `const candidates = records.filter(isLive);`,
+      `history.current = versions.at(-1);`,
+      `const effective = pick(history);`,
+      `const winner = versions[0];`,
+      `history.selectedVersion = 3;`,
+      `const records = [...intake.durable, ...intake.activeTasks];`,
+      `const target = latestVersion(index.get(id));`,
+      `const target = nearest(index.get(id), version);`,
+    ])
+      expect(
+        LATER_PATCH_SCOPE.some((p) => p.test(bad)),
+        bad,
+      ).toBe(true);
   });
 
   it('confines JSON.stringify to the own-data canonical serializer', () => {

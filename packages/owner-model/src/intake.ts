@@ -134,6 +134,18 @@ export interface OwnerStateIntakeRequest {
   readonly records: readonly unknown[];
 }
 
+/**
+ * Results produced by `intakeOwnerState` in this module instance. Later
+ * internal stages (for example lineage.ts) accept only these, so the Patch-2
+ * intake remains the single boundary for caller-supplied values.
+ */
+const PRODUCED = new WeakSet<object>();
+
+/** Whether `value` is a result produced by `intakeOwnerState` (internal). */
+export function isOwnerStateIntake(value: unknown): value is OwnerStateIntake {
+  return value !== null && typeof value === 'object' && PRODUCED.has(value);
+}
+
 /** Deeply frozen, canonically ordered, owner-bound intake result. */
 export interface OwnerStateIntake {
   readonly ownerId: OwnerId;
@@ -524,7 +536,8 @@ export function intakeOwnerState(request: unknown): OwnerStateIntake {
     result['ownerId'] = ownerId;
     result['durable'] = Object.freeze(durable);
     result['activeTasks'] = Object.freeze(activeTasks);
-    return Object.freeze(result) as unknown as OwnerStateIntake;
+    PRODUCED.add(Object.freeze(result));
+    return result as unknown as OwnerStateIntake;
   } catch (thrown) {
     throw new OwnerModelError(
       isObject(thrown)

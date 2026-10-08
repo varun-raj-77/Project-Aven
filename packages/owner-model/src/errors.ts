@@ -11,14 +11,17 @@
  *
  * The code set is deliberately minimal. Later AVEN-009 patches add codes only
  * when their own behavior needs them. Patch 2 (owner-state intake) adds the
- * three identity codes; none carries a position, ID, count or owner.
+ * three identity codes and Patch 3 (durable lineage) adds two lineage codes;
+ * none carries a position, ID, version, category, path, count or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
   | 'internal_error'
   | 'conflicting_duplicate'
   | 'identity_conflict'
-  | 'version_order_conflict';
+  | 'version_order_conflict'
+  | 'invalid_lineage_reference'
+  | 'lineage_cycle';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -30,6 +33,10 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'An owner-state identity changes record kind or category across versions; no owner state was read',
   version_order_conflict:
     'An owner-state creation time moves backwards as its version increases; no owner state was read',
+  invalid_lineage_reference:
+    'An owner-state lineage reference does not resolve to a version of the same category; no lineage was built',
+  lineage_cycle:
+    'Owner-state lineage references form a cycle; no lineage was built',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -47,6 +54,8 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'conflicting_duplicate') return 'conflicting_duplicate';
   if (value === 'identity_conflict') return 'identity_conflict';
   if (value === 'version_order_conflict') return 'version_order_conflict';
+  if (value === 'invalid_lineage_reference') return 'invalid_lineage_reference';
+  if (value === 'lineage_cycle') return 'lineage_cycle';
   return 'internal_error';
 }
 
