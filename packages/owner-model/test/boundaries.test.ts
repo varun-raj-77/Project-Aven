@@ -687,6 +687,25 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       expect(PATCH_4_SCOPE[label]!.test(bad), bad).toBe(true);
   });
 
+  it('validates recorded transitions only as inert snapshots', () => {
+    // The frozen schema is applied to the inert own-data copy alone, and
+    // every caller element passes through the descriptor-only snapshot.
+    const claimsCode = source['claims.ts']!;
+    const inertOnly = (text: string) => [
+      [...text.matchAll(/\.safeParse\(\s*(\w+)\s*\)/g)].map((m) => m[1]),
+      /copies\.push\(\s*inert\(\s*value\s*\)\s*\)/.test(text),
+      /Reflect\.get\s*\(|\bfor\s*\(\s*const\s+\w+\s+in\b/.test(text),
+    ];
+    expect(inertOnly(claimsCode)).toEqual([['copy'], true, false]);
+    for (const bad of [
+      claimsCode.replace('safeParse(copy)', 'safeParse(value)'),
+      claimsCode.replace('copies.push(inert(value))', 'copies.push(value)'),
+      `${claimsCode}\nconst v = Reflect.get(target, key);`,
+      `${claimsCode}\nfor (const key in value) record[key] = value[key];`,
+    ])
+      expect(inertOnly(bad)).not.toEqual([['copy'], true, false]);
+  });
+
   it('indexes recorded transitions once and never scans them per claim', () => {
     // The validated transition array is traversed exactly once, to build the
     // exact-event index; claims then resolve by Map lookup only.
