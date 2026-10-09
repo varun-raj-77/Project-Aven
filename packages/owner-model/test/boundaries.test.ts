@@ -51,6 +51,8 @@ const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'LearningTransition',
     'LearnedItemReference',
     'EventId',
+    // Patch 5: the frozen timestamp schema, for the explicit reference time.
+    'TimestampSchema',
   ]),
 };
 
@@ -295,7 +297,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
@@ -305,6 +307,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       'invalid_lineage_reference',
       'lineage_cycle',
       'invalid_lifecycle_claim',
+      'invalid_owner_state_view',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -327,6 +330,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'Owner-state lineage references form a cycle; no lineage was built',
       invalid_lifecycle_claim:
         'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
+      invalid_owner_state_view:
+        'An owner-state record is inconsistent with its category; no owner-state view was built',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -548,9 +553,17 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'index.ts',
       'intake.ts',
       'lineage.ts',
+      'timestamps.ts',
+      'views.ts',
     ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
-    for (const later of ['views.ts', 'active-task.ts'])
+    for (const later of [
+      'active-task.ts',
+      'persistence.ts',
+      'rebuild.ts',
+      'context-source.ts',
+      'adapter.ts',
+    ])
       expect(files, later).not.toContain(later);
   });
 
@@ -610,6 +623,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'fresh-process.test.ts',
       'intake.test.ts',
       'lineage.test.ts',
+      'views.test.ts',
     ]);
   });
 
@@ -640,6 +654,74 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
         if (to) { visit(to); }
       }`),
     ).toEqual(['visit']);
+  });
+
+  it('keeps durable category views declared-only: no Root selection, Broker matching, task view, truth or transition following', () => {
+    // Patch 5 groups typed durable state and projects it as of an explicit
+    // time. Root selects trusted versions; the Context Broker matches and
+    // ranks; Patch 6 owns active tasks; nothing here follows replacement or
+    // fallback, executes procedures or declares truth.
+    const PATCH_5_SCOPE: Record<string, RegExp> = {
+      'Root or trusted-version selection':
+        /chooseTrusted|preferTrusted|rootSelected|selectedByRoot|authorityWinner|trustedWinner|approvedCurrent|authoritative|\bofficial|effectiveTruth|\bwinner\b|\bauthority\b/i,
+      'authority-style current or effective selection':
+        /current(?!Declared)|effective|\bselect\w*|\bbest\w*|latestUsable|inForce/i,
+      'Context Broker matching or ranking':
+        /relevan|salien|confidence|\brank|\bscore|freshness|negative|\bquery|\.domain\b|taskType|\.taskId\b|qualifiers|recipient|\bentity\b|\.context\b/i,
+      'active-task view': /activeTask|active_task/i,
+      'transition or lineage-edge following':
+        /\.replacement\b|\.fallback\b|\.edges\b|\.claims\b|learning_|transition/i,
+      'semantic invention':
+        /\btruth|isTrue|polarity|personality|\bstrength|universal|inferredIntent|\bglobal\b|execute|\bsteps\b/i,
+    };
+    const viewsCode = source['views.ts']!;
+    for (const [label, pattern] of Object.entries(PATCH_5_SCOPE))
+      expect(pattern.test(viewsCode), label).toBe(false);
+    for (const [label, bad] of [
+      [
+        'Root or trusted-version selection',
+        `const v = chooseTrustedVersion(history);`,
+      ],
+      ['Root or trusted-version selection', `if (preferTrusted) pick(v1);`],
+      ['Root or trusted-version selection', `view.authoritative = true;`],
+      [
+        'authority-style current or effective selection',
+        `view.current = latest;`,
+      ],
+      [
+        'authority-style current or effective selection',
+        `const effective = older;`,
+      ],
+      [
+        'Context Broker matching or ranking',
+        `items.sort((a, b) => b.score - a.score);`,
+      ],
+      [
+        'Context Broker matching or ranking',
+        `if (record.scope.domain !== query.domain) continue;`,
+      ],
+      [
+        'Context Broker matching or ranking',
+        `const relevance = coverage(record);`,
+      ],
+      ['active-task view', `views.activeTasks = intake.activeTasks;`],
+      [
+        'transition or lineage-edge following',
+        `const head = index.get(record.lifecycle.replacement);`,
+      ],
+      [
+        'transition or lineage-edge following',
+        `for (const edge of lineage.edges) follow(edge);`,
+      ],
+      ['semantic invention', `view.isTrue = true;`],
+      ['semantic invention', `view.global = true;`],
+      ['semantic invention', `view.personality = 'direct';`],
+      [
+        'semantic invention',
+        `for (const step of content.steps) execute(step);`,
+      ],
+    ] as const)
+      expect(PATCH_5_SCOPE[label]!.test(bad), bad).toBe(true);
   });
 
   it('keeps lifecycle-claim verification read-only: no in-force selection, Root conclusion or transition application', () => {

@@ -11,9 +11,10 @@
  *
  * The code set is deliberately minimal. Later AVEN-009 patches add codes only
  * when their own behavior needs them. Patch 2 (owner-state intake) adds the
- * three identity codes, Patch 3 (durable lineage) adds two lineage codes and
- * Patch 4 (lifecycle claims) adds one claim code; none carries a position,
- * ID, version, category, path, count, event, transition kind or owner.
+ * three identity codes, Patch 3 (durable lineage) adds two lineage codes,
+ * Patch 4 (lifecycle claims) adds one claim code and Patch 5 (category
+ * views) adds one view-consistency code; none carries a position, ID,
+ * version, category, path, count, event, transition kind, time or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
@@ -23,7 +24,8 @@ export type OwnerModelErrorCode =
   | 'version_order_conflict'
   | 'invalid_lineage_reference'
   | 'lineage_cycle'
-  | 'invalid_lifecycle_claim';
+  | 'invalid_lifecycle_claim'
+  | 'invalid_owner_state_view';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -41,6 +43,8 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'Owner-state lineage references form a cycle; no lineage was built',
   invalid_lifecycle_claim:
     'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
+  invalid_owner_state_view:
+    'An owner-state record is inconsistent with its category; no owner-state view was built',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -61,6 +65,7 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'invalid_lineage_reference') return 'invalid_lineage_reference';
   if (value === 'lineage_cycle') return 'lineage_cycle';
   if (value === 'invalid_lifecycle_claim') return 'invalid_lifecycle_claim';
+  if (value === 'invalid_owner_state_view') return 'invalid_owner_state_view';
   return 'internal_error';
 }
 
