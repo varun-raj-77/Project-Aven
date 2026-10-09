@@ -243,6 +243,8 @@ const MESSAGES: Record<OwnerModelErrorCode, string> = {
     'An owner-state record is inconsistent with its category; no owner-state view was built',
   active_task_conflict:
     'Several active task states declare the same task binding; no active task view was built',
+  invalid_persisted_owner_model:
+    'Persisted owner state failed read-only reconstruction; no owner model was built',
 };
 const expected = (code: OwnerModelErrorCode) =>
   JSON.stringify({ name: 'OwnerModelError', code, message: MESSAGES[code] });

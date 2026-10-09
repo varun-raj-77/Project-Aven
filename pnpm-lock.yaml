@@ -127,6 +127,12 @@ importers:
       '@aven/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@aven/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@aven/storage':
+        specifier: workspace:*
+        version: link:../storage
       zod:
         specifier: 4.6.5
         version: 4.6.5

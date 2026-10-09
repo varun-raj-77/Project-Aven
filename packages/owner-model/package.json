@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-009 Typed Owner Model (patch 1 scaffold): version, error and boundary guardrails only; no owner-state behavior, storage, Ledger, model runtime, network, learning or authority",
+  "description": "AVEN-009 Typed Owner Model: pure owner-bound typed views over frozen contracts; the ./persistence subpath adds a read-only rebuild over storage and the owner-bound Ledger. No writer, learning, model runtime, network or authority.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./persistence": "./src/persistence/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
@@ -13,6 +14,8 @@
   },
   "dependencies": {
     "@aven/contracts": "workspace:*",
+    "@aven/ledger": "workspace:*",
+    "@aven/storage": "workspace:*",
     "zod": "4.6.5"
   },
   "devDependencies": {
