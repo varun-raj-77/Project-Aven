@@ -5,7 +5,11 @@
 Build Aven v0.1. Project selection is closed unless implementation evidence
 reveals a concrete fatal problem. Current authorized work is **AVEN-009 only**:
 the Typed Owner Model (`packages/owner-model`), implemented patch by patch.
-AVEN-001 through AVEN-008 and MAINT-001 are frozen; the current baseline is tag
+Patches 1-9 (implementation through documentation and reconciliation, report
+`docs/AVEN_009_REPORT.md`) are on the isolated candidate branch, pending final
+external review, Windows validation and an explicitly authorized merge and tag;
+AVEN-009 is not frozen, and only review corrections remain in scope. AVEN-001
+through AVEN-008 and MAINT-001 are frozen; the current baseline is tag
 `aven-008`, commit `4174080998d383fe78e8e4799e13103d42635151`. Do not
 semantically modify a frozen layer. Do not begin AVEN-010 or any later
 milestone. Owner-model work stays representation- and read-oriented: typed,
@@ -84,8 +88,9 @@ Consequences:
   discipline, shared contracts, SQLite integrity, Ledger behavior, the local API
   boundary, the model-runtime boundary and model-output recording path, the
   AVEN-007 A/B baselines and dataset integrity, the AVEN-008 Context Broker's
-  selection mechanics, and the AVEN-009 owner-model scaffold boundaries, not a
-  complete Aven runtime. Report limitations honestly.
+  selection mechanics, and the AVEN-009 owner-model intake, lineage,
+  lifecycle-claim, view, rebuild and context-source mechanics on synthetic data,
+  not a complete Aven runtime. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -163,15 +168,32 @@ from external operator/Root configuration and are never stored in the Ledger,
 owner memory, model input or runtime metadata. `packages/owner-model`
 (`@aven/owner-model`, version `aven-009-owner-model-v1`) is the AVEN-009 Typed
 Owner Model. It reuses the frozen AVEN-002 owner-state, provenance, scope and
-lifecycle contracts rather than defining a second vocabulary, keeps the
-`.gitkeep` that the AVEN-008 tripwire pins, and its core depends only on
-`@aven/contracts` and `zod`; any storage, Ledger or Context Broker dependency is
-added only by its own reviewed patch. Other app/package directories remain
-placeholders. Tooling schemas still describe experimental metadata only. No live
-provider adapter or network model call, Strands or other framework adapter,
-public generation route, owner-state writer, learning algorithms, correction
-handling, negative-signal generation, routing, streaming, tool calling, Root
-enforcement, authentication, UI, execution, scorer, promotion controller, or
-agent orchestration in this milestone. Stop after each patch and report files,
-checks, assumptions, and deliberate deferrals for external review. Commit only
-to the isolated AVEN-009 candidate branch; do not merge or tag.
+lifecycle contracts rather than defining a second vocabulary and keeps the
+`.gitkeep` that the AVEN-008 tripwire pins. Its root entry (five runtime
+exports: version, config, error codes, `OwnerModelError`, `intakeOwnerState`)
+depends only on `@aven/contracts` and `zod`. Internal modules, not exported, add
+structural lineage, agreement of trusted/superseded/revoked lifecycle claims
+with recorded transitions (agreement is not authenticated Root authority),
+durable category views at an explicit `referenceTime` (`latestDeclared` and
+`currentDeclared` are declared state, never Root's trusted-version selection),
+and the active task view for one exact `(sessionId, taskId)`. The
+`@aven/owner-model/persistence` subpath (`rebuildOwnerModel`, adding
+`@aven/storage` and `@aven/ledger`) is a read-only rebuild: stored immutable
+snapshots plus owner-bound Ledger replay through those validators, with
+owner-origin provenance and owner confirmations checked against recorded events;
+it synthesizes no snapshot from events and writes nothing, and its snapshot read
+and Ledger replay are separate read transactions. The
+`@aven/owner-model/context-source` subpath (`createOwnerModelContextSources`,
+adding `@aven/context-broker`) adapts a genuine rebuilt model into four
+read-only sources for the unchanged Broker under the frozen, provisional,
+ordinal configuration `aven-009-owner-model-source-config-v1` (negativeRetrieval
+always 0); changing it requires a new version and evidence. Package and subpath
+separation is not process or security isolation. Other app/package directories
+remain placeholders. Tooling schemas still describe experimental metadata only.
+No live provider adapter or network model call, Strands or other framework
+adapter, public generation route, owner-state writer, learning algorithms,
+correction handling, negative-signal generation, routing, streaming, tool
+calling, Root enforcement, authentication, UI, execution, scorer, promotion
+controller, or agent orchestration in this milestone. Stop after each patch and
+report files, checks, assumptions, and deliberate deferrals for external review.
+Commit only to the isolated AVEN-009 candidate branch; do not merge or tag.

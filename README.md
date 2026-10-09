@@ -5,11 +5,12 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-009 Typed Owner Model, in progress on frozen AVEN-008
-(`4174080`, tag `aven-008`).** The
-[contracts package](packages/contracts/README.md) defines schemas and types; the
-[storage package](packages/storage/README.md) provides local SQLite schema,
-integrity constraints, and migrations. The
+**Current scope: AVEN-009 Typed Owner Model, implemented (patches 1-9) on an
+isolated candidate branch over frozen AVEN-008 (`4174080`, tag `aven-008`),
+pending final review, Windows validation and an authorized merge and tag; not
+frozen.** The [contracts package](packages/contracts/README.md) defines schemas
+and types; the [storage package](packages/storage/README.md) provides local
+SQLite schema, integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
 owner-bound reads, observational replay, and integrity inspection. The
 [API app](apps/api/README.md) adds a loopback HTTP boundary for owner-scoped
@@ -32,10 +33,17 @@ call, no HTTP route that generates a response, and no experimental result: the
 dataset's execution status is `not_run`.** The
 [AVEN-008 report](docs/AVEN_008_REPORT.md) (configuration v2, after independent
 review) is frozen at tag `aven-008`. The
-[owner-model package](packages/owner-model) currently contains only the AVEN-009
-scaffold (version, error and boundary guardrails); it has no owner-state
-behavior yet. There is no web app, correction engine, learning engine, scorer,
-authentication, or Root gateway. EXP-001 has not been run.
+[owner-model package](packages/owner-model/README.md) adds the AVEN-009 Typed
+Owner Model: owner-bound typed intake of the frozen owner-state contracts,
+structural version lineage, agreement of lifecycle claims with recorded
+transitions, declared (non-authoritative) category and active-task views, a
+read-only rebuild from stored snapshots plus owner-bound Ledger history, and a
+read-only source adapter that offers that state to the unchanged Context Broker
+under a frozen provisional configuration. It writes no owner state, learns
+nothing, interprets no correction and decides no authority; see the
+[AVEN-009 report](docs/AVEN_009_REPORT.md). There is no web app, owner-state
+writer, correction engine, learning engine, scorer, authentication, or Root
+gateway. EXP-001 has not been run.
 
 ## Start here
 
@@ -85,6 +93,7 @@ database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
 `pnpm --filter @aven/runtime test` runs runtime-boundary tests;
 `pnpm --filter @aven/baseline test` runs baseline tests;
 `pnpm --filter @aven/context-broker test` runs Context Broker tests;
+`pnpm --filter @aven/owner-model test` runs owner-model tests;
 `pnpm dataset:check` validates the frozen AVEN-007 dataset against its manifest.
 `pnpm db:migrate` creates or migrates the ignored local `data/aven.sqlite`; it
 does not record owner experience. `pnpm api:start --owner owner_local` declares
@@ -111,7 +120,7 @@ aven/
                  web (placeholder)
   packages/      contracts, storage, ledger, runtime (AVEN-006), baseline
                  (AVEN-007), context-broker (AVEN-008), owner-model
-                 (AVEN-009, scaffold); root, learning, eval, test-utils
+                 (AVEN-009 candidate); root, learning, eval, test-utils
                  (placeholders)
   tooling/       scripts and bootstrap tests
 ```
@@ -148,8 +157,10 @@ state. AVEN-007 adds only the A/B baselines and the frozen dataset; the held-out
 split is frozen but not secret. AVEN-008 adds only the Context Broker: transient
 task context selected from injected candidate sources, with no persistence,
 learning, correction handling or permission decision. AVEN-008 is frozen at tag
-`aven-008`. AVEN-009 (Typed Owner Model) is being implemented patch by patch on
-an isolated candidate branch, unmerged and untagged, pending external review;
-AVEN-010 and later work remain deferred. The AVEN-001 source summaries and
-experiment documents retain their historical milestone context; the current
-authorization is recorded in `AGENTS.md`.
+`aven-008`. AVEN-009 adds only the Typed Owner Model: read-only, owner-isolated
+typed views and Broker sources over recorded state, with no writer, learning,
+correction handling, promotion or permission decision. Its implementation is
+complete on an isolated candidate branch, unmerged and untagged, pending final
+external review; AVEN-010 and later work remain deferred and not started. The
+AVEN-001 source summaries and experiment documents retain their historical
+milestone context; the current authorization is recorded in `AGENTS.md`.
