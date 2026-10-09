@@ -124,6 +124,9 @@ importers:
 
   packages/owner-model:
     dependencies:
+      '@aven/context-broker':
+        specifier: workspace:*
+        version: link:../context-broker
       '@aven/contracts':
         specifier: workspace:*
         version: link:../contracts

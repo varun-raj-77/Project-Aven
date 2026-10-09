@@ -302,7 +302,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code, patch 6 one task code, patch 7 one persisted code)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code, patch 6 one task code, patch 7 one persisted code, patch 8 one context code)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
@@ -315,6 +315,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       'invalid_owner_state_view',
       'active_task_conflict',
       'invalid_persisted_owner_model',
+      'invalid_owner_model_context',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -343,6 +344,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'Several active task states declare the same task binding; no active task view was built',
       invalid_persisted_owner_model:
         'Persisted owner state failed read-only reconstruction; no owner model was built',
+      invalid_owner_model_context:
+        'Owner-model context candidates do not fit the context source contract; no candidates were offered',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -568,10 +571,13 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'timestamps.ts',
       'views.ts',
     ]);
-    // Patch 7: the only subdirectory is the persistence subpath.
-    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([
-      'persistence',
-    ]);
+    // Patch 7/8: the only subdirectories are the two reviewed subpaths.
+    expect(
+      entries
+        .filter((e) => !e.isFile())
+        .map((e) => e.name)
+        .sort(),
+    ).toEqual(['context-source', 'persistence']);
     for (const later of [
       'persistence.ts',
       'rebuild.ts',
@@ -635,6 +641,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'active-task.test.ts',
       'boundaries.test.ts',
       'claims.test.ts',
+      'context-source.test.ts',
       'fresh-process.test.ts',
       'intake.test.ts',
       'lineage.test.ts',
@@ -962,8 +969,10 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
       './persistence': './src/persistence/index.ts',
+      './context-source': './src/context-source/index.ts',
     });
     expect(manifest.dependencies).toEqual({
+      '@aven/context-broker': 'workspace:*',
       '@aven/contracts': 'workspace:*',
       '@aven/ledger': 'workspace:*',
       '@aven/storage': 'workspace:*',
@@ -1170,5 +1179,181 @@ describe('AVEN-009 owner-model persistence subpath tripwires (not runtime securi
     expect(
       importViolations(`import { createLedger } from '@aven/ledger';`),
     ).not.toEqual([]);
+  });
+});
+
+/**
+ * AVEN-009 patch 8: static regression tripwires for the read-only Context
+ * Broker source adapter subpath (pattern checks over code, not isolation).
+ */
+const contextDir = new URL('../src/context-source/', import.meta.url);
+const contextEntries = readdirSync(contextDir, { withFileTypes: true });
+const contextFiles = contextEntries
+  .filter((e) => e.isFile())
+  .map((e) => e.name);
+const contextCode = contextFiles
+  .map((f) => code(readFileSync(new URL(f, contextDir), 'utf8')))
+  .join('\n');
+
+const CONTEXT_IMPORTS: Record<string, ReadonlySet<string>> = {
+  '@aven/contracts': new Set([
+    'ActiveTaskState',
+    'DurableOwnerState',
+    'OwnerId',
+  ]),
+  '@aven/context-broker': new Set([
+    'ContextCandidateSchema',
+    'ContextCandidate',
+    'ContextSource',
+    'ContextSourceKind',
+    'ContextSourceQuery',
+  ]),
+  'node:crypto': new Set(['createHash']),
+};
+function contextImportViolations(text: string): string[] {
+  const found: string[] = [];
+  for (const m of text.matchAll(
+    /\b(?:import|export)\b\s*(?:type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?|\w+)?\s*from\s+(['"])([^'"]+)\2/gs,
+  )) {
+    const module = m[3] ?? '';
+    if (/^\.\.?\/([\w-]+\/)?[\w-]+\.ts$/.test(module)) {
+      if (module.startsWith('../') && module.split('/').length > 2)
+        if (module !== '../persistence/rebuild.ts') found.push(module);
+      continue;
+    }
+    const allowed = CONTEXT_IMPORTS[module];
+    const clause = m[1] ?? '';
+    if (!allowed || !clause.startsWith('{')) {
+      found.push(module);
+      continue;
+    }
+    for (const raw of clause.slice(1, -1).split(',')) {
+      const name = raw
+        .trim()
+        .replace(/^type\s+/, '')
+        .split(/\s+as\s+/)[0]!
+        .trim();
+      if (name && !allowed.has(name)) found.push(`${module}: ${name}`);
+    }
+  }
+  if (/\bimport\s*['"]|\bimport\s*\(|\brequire\s*\(/.test(text))
+    found.push('side-effect, dynamic or require import');
+  return found;
+}
+
+const CONTEXT_RULES: Record<string, RegExp> = {
+  'runtime, API, baseline, storage, Ledger, Root or a new Broker':
+    /@aven\/(runtime|api|baseline|storage|ledger|root)|createContextBroker|rebuildOwnerModel\s*\(|openStorage|createLedger/,
+  'network, file, process or environment':
+    /node:(?!crypto['"])|readFile|writeFile|\bfs\.|\bfetch\b|WebSocket|child_process|\bspawn\s*\(|process\.env|\bglobalThis\b/,
+  'clock, randomness or timers':
+    /Date\.now|new\s+Date\s*\(|performance\.now|Math\.random|randomUUID|randomBytes|getRandomValues|\bset(Timeout|Interval|Immediate)\b/,
+  'permission or authority':
+    /\b(ALLOW|DENY|REQUIRE_OWNER_APPROVAL)\b|PolicyDecision|permission|authori[sz]|approved/,
+  'current instruction, prompt assembly or correction':
+    /current_instruction|prompt|systemMessage|\brole\s*:|messages\s*[:=]|correct|override|negative.?signal/i,
+  'ranking, relevance or retrieval':
+    /relevan|\brank|\bscore|freshness|trustFactor|scopeFactor|weight|embedding|vector|cosine|similarity/i,
+  'text parsing, truncation or trimming':
+    /\.slice\s*\(|substring|substr\s*\(|truncat|\.padEnd|\.includes\s*\(|\.indexOf\s*\(|\.test\s*\(|\.match\s*\(|RegExp|toLowerCase|toUpperCase|\.trim\s*\(/,
+  'writes or transition application':
+    /appendEvent|\bmigrate\b|\b(INSERT|UPDATE|DELETE|REPLACE)\b|\b(save|write|promote|revoke|supersede|apply|restore)\w*\s*\(/,
+};
+
+describe('AVEN-009 owner-model context-source subpath tripwires (not runtime security)', () => {
+  it('keeps exactly the reviewed adapter modules and surface', async () => {
+    expect(contextFiles.sort()).toEqual(['index.ts', 'sources.ts']);
+    expect(contextEntries.filter((e) => !e.isFile())).toEqual([]);
+    const surface = await import('../src/context-source/index.ts');
+    expect(Object.keys(surface).sort()).toEqual([
+      'AVEN_OWNER_MODEL_SOURCE_CONFIG_V1',
+      'createOwnerModelContextSources',
+    ]);
+  });
+
+  it('imports only the reviewed Broker, contract and crypto names and owner-model modules', () => {
+    expect(contextImportViolations(contextCode)).toEqual([]);
+    for (const bad of [
+      `import { createContextBroker } from '@aven/context-broker';`,
+      `import { RANKING_WEIGHTS_BASIS_POINTS } from '@aven/context-broker';`,
+      `import * as broker from '@aven/context-broker';`,
+      `import { openStorage } from '@aven/storage';`,
+      `import { randomUUID } from 'node:crypto';`,
+      `import { readFileSync } from 'node:fs';`,
+      `import { invokeModelRuntime } from '@aven/runtime';`,
+      `import { secret } from '../../ledger/src/index.ts';`,
+    ])
+      expect(contextImportViolations(bad), bad).not.toEqual([]);
+  });
+
+  for (const [rule, pattern] of Object.entries(CONTEXT_RULES))
+    it(`has no ${rule}`, () => {
+      expect(pattern.test(contextCode), rule).toBe(false);
+    });
+
+  it('rejects known-bad adapter samples', () => {
+    for (const [rule, bad] of [
+      [
+        'current instruction, prompt assembly or correction',
+        `reference: { kind: 'current_instruction', evidence, task }`,
+      ],
+      [
+        'current instruction, prompt assembly or correction',
+        `const systemPrompt = candidates.map((c) => c.text).join('\\n');`,
+      ],
+      [
+        'current instruction, prompt assembly or correction',
+        `if (record.provenance.kind === 'explicit_owner_correction') narrow(scope);`,
+      ],
+      [
+        'ranking, relevance or retrieval',
+        `candidates.sort((a, b) => b.score - a.score);`,
+      ],
+      [
+        'ranking, relevance or retrieval',
+        `const relevance = coverage(query.request, text);`,
+      ],
+      ['text parsing, truncation or trimming', `text: text.slice(0, 20000),`],
+      [
+        'text parsing, truncation or trimming',
+        `if (text.includes('trusted')) lifecycle = 'trusted';`,
+      ],
+      [
+        'text parsing, truncation or trimming',
+        `return candidates.slice(0, query.maxCandidates);`,
+      ],
+      [
+        'permission or authority',
+        `if (record.provenance.kind === 'owner_approval') decision = 'ALLOW';`,
+      ],
+      ['clock, randomness or timers', `const id = \`om:\${Date.now()}\`;`],
+      ['clock, randomness or timers', `const salt = Math.random();`],
+      [
+        'runtime, API, baseline, storage, Ledger, Root or a new Broker',
+        `const broker = createContextBroker({ sources });`,
+      ],
+      ['writes or transition application', `ledger.appendEvent(event);`],
+    ] as const)
+      expect(CONTEXT_RULES[rule]!.test(bad), bad).toBe(true);
+  });
+
+  it('sets negativeRetrieval only from the frozen v1 constant', () => {
+    const uses = [
+      ...contextCode.matchAll(/negativeRetrieval\s*:\s*([^,\n}]+)/g),
+    ].map((m) => m[1]!.trim());
+    expect(uses.sort()).toEqual([
+      '0',
+      'CONFIG.negativeRetrieval',
+      'CONFIG.negativeRetrieval',
+    ]);
+  });
+
+  it('keeps @aven/context-broker out of the core and persistence modules', () => {
+    for (const [file, text] of Object.entries(source))
+      expect(
+        /@aven\/context-broker|from\s+['"]\.\/context-source/.test(text),
+        file,
+      ).toBe(false);
+    expect(/@aven\/context-broker/.test(persistenceCode)).toBe(false);
   });
 });

@@ -14,9 +14,10 @@
  * three identity codes, Patch 3 (durable lineage) adds two lineage codes,
  * Patch 4 (lifecycle claims) adds one claim code, Patch 5 (category views)
  * adds one view-consistency code, Patch 6 (active task view) adds one
- * task-conflict code and Patch 7 (read-only rebuild) adds one persisted
- * integrity code; none carries a position, ID, version, category, path,
- * count, event, transition kind, time, task binding, table or owner.
+ * task-conflict code, Patch 7 (read-only rebuild) adds one persisted
+ * integrity code and Patch 8 (context source adapter) adds one candidate
+ * contract code; none carries a position, ID, version, category, path,
+ * count, event, transition kind, time, task binding, table, text or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
@@ -29,7 +30,8 @@ export type OwnerModelErrorCode =
   | 'invalid_lifecycle_claim'
   | 'invalid_owner_state_view'
   | 'active_task_conflict'
-  | 'invalid_persisted_owner_model';
+  | 'invalid_persisted_owner_model'
+  | 'invalid_owner_model_context';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -53,6 +55,8 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'Several active task states declare the same task binding; no active task view was built',
   invalid_persisted_owner_model:
     'Persisted owner state failed read-only reconstruction; no owner model was built',
+  invalid_owner_model_context:
+    'Owner-model context candidates do not fit the context source contract; no candidates were offered',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -77,6 +81,8 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'active_task_conflict') return 'active_task_conflict';
   if (value === 'invalid_persisted_owner_model')
     return 'invalid_persisted_owner_model';
+  if (value === 'invalid_owner_model_context')
+    return 'invalid_owner_model_context';
   return 'internal_error';
 }
 
