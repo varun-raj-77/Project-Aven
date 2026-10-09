@@ -7,6 +7,7 @@ import {
 } from '@aven/contracts';
 import { ambientIntact, sealAmbient, type AmbientSeal } from './ambient.ts';
 import { canonicalText, compareCodeUnits } from './canonical-text.ts';
+import { compareInstants } from './timestamps.ts';
 import { OwnerModelError, type OwnerModelErrorCode } from './errors.ts';
 
 /**
@@ -346,21 +347,10 @@ function canonical(value: unknown, ownerId: string): unknown {
 }
 
 /* Exact instant comparison of frozen AVEN-002 timestamps (no clock). */
-const TIMESTAMP =
-  /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/;
-
 function compareTimestamps(a: string, b: string): number {
-  const [x, y] = [a.match(TIMESTAMP), b.match(TIMESTAMP)];
-  if (x === null || y === null) throw INTERNAL;
-  const [msA, msB] = [
-    Date.parse(`${x[1]}${x[3]}`),
-    Date.parse(`${y[1]}${y[3]}`),
-  ];
-  if (!Number.isFinite(msA) || !Number.isFinite(msB)) throw INTERNAL;
-  if (msA !== msB) return msA < msB ? -1 : 1;
-  const [fa, fb] = [x[2] ?? '', y[2] ?? ''];
-  const width = Math.max(fa.length, fb.length);
-  return compareCodeUnits(fa.padEnd(width, '0'), fb.padEnd(width, '0'));
+  const order = compareInstants(a, b);
+  if (order === undefined) throw INTERNAL;
+  return order;
 }
 
 interface Entry {

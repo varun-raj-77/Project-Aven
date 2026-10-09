@@ -239,6 +239,8 @@ const MESSAGES: Record<OwnerModelErrorCode, string> = {
     'Owner-state lineage references form a cycle; no lineage was built',
   invalid_lifecycle_claim:
     'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
+  invalid_owner_state_view:
+    'An owner-state record is inconsistent with its category; no owner-state view was built',
 };
 const expected = (code: OwnerModelErrorCode) =>
   JSON.stringify({ name: 'OwnerModelError', code, message: MESSAGES[code] });
