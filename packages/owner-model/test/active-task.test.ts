@@ -117,6 +117,8 @@ const MESSAGES: Record<OwnerModelErrorCode, string> = {
     'Several active task states declare the same task binding; no active task view was built',
   invalid_persisted_owner_model:
     'Persisted owner state failed read-only reconstruction; no owner model was built',
+  invalid_owner_model_context:
+    'Owner-model context candidates do not fit the context source contract; no candidates were offered',
 };
 const expected = (code: OwnerModelErrorCode) =>
   JSON.stringify({ name: 'OwnerModelError', code, message: MESSAGES[code] });

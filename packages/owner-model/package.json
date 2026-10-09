@@ -3,16 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-009 Typed Owner Model: pure owner-bound typed views over frozen contracts; the ./persistence subpath adds a read-only rebuild over storage and the owner-bound Ledger. No writer, learning, model runtime, network or authority.",
+  "description": "AVEN-009 Typed Owner Model: pure owner-bound typed views over frozen contracts; ./persistence adds a read-only rebuild over storage and the owner-bound Ledger; ./context-source adds a read-only adapter for the AVEN-008 Context Broker. No writer, learning, model runtime, network or authority.",
   "exports": {
     ".": "./src/index.ts",
-    "./persistence": "./src/persistence/index.ts"
+    "./persistence": "./src/persistence/index.ts",
+    "./context-source": "./src/context-source/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/owner-model/test"
   },
   "dependencies": {
+    "@aven/context-broker": "workspace:*",
     "@aven/contracts": "workspace:*",
     "@aven/ledger": "workspace:*",
     "@aven/storage": "workspace:*",
