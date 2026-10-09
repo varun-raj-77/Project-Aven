@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aven experiment foundation, contracts, storage, AVEN-004 Experience Ledger, AVEN-005 local session API, AVEN-006 model runtime boundary, AVEN-007 A/B baselines with prebuilt eval dataset, AVEN-008 Context Broker and AVEN-009 owner-model scaffold",
+  "description": "Aven experiment foundation, contracts, storage, AVEN-004 Experience Ledger, AVEN-005 local session API, AVEN-006 model runtime boundary, AVEN-007 A/B baselines with prebuilt eval dataset, AVEN-008 Context Broker and AVEN-009 Typed Owner Model (candidate)",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24 <25",
