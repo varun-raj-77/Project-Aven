@@ -5,12 +5,13 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-009 Typed Owner Model, implemented (patches 1-9) on an
-isolated candidate branch over frozen AVEN-008 (`4174080`, tag `aven-008`),
-pending final review, Windows validation and an authorized merge and tag; not
-frozen.** The [contracts package](packages/contracts/README.md) defines schemas
-and types; the [storage package](packages/storage/README.md) provides local
-SQLite schema, integrity constraints, and migrations. The
+**Current scope: AVEN-010 Correction Events and Immediate Session Overrides, in
+progress patch by patch on an isolated branch over frozen AVEN-009 (`80057a2`,
+tag `aven-009`); not merged, not tagged, not frozen. Patch 1 reconciles the
+status documents and adds the commit attribution gate; no correction behavior
+exists yet.** The [contracts package](packages/contracts/README.md) defines
+schemas and types; the [storage package](packages/storage/README.md) provides
+local SQLite schema, integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
 owner-bound reads, observational replay, and integrity inspection. The
 [API app](apps/api/README.md) adds a loopback HTTP boundary for owner-scoped
@@ -41,9 +42,9 @@ read-only rebuild from stored snapshots plus owner-bound Ledger history, and a
 read-only source adapter that offers that state to the unchanged Context Broker
 under a frozen provisional configuration. It writes no owner state, learns
 nothing, interprets no correction and decides no authority; see the
-[AVEN-009 report](docs/AVEN_009_REPORT.md). There is no web app, owner-state
-writer, correction engine, learning engine, scorer, authentication, or Root
-gateway. EXP-001 has not been run.
+[AVEN-009 report](docs/AVEN_009_REPORT.md), frozen at tag `aven-009`. There is
+no web app, owner-state writer, learning engine, scorer, authentication, or Root
+gateway, and no correction recorder or override yet. EXP-001 has not been run.
 
 ## Start here
 
@@ -95,6 +96,10 @@ database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
 `pnpm --filter @aven/context-broker test` runs Context Broker tests;
 `pnpm --filter @aven/owner-model test` runs owner-model tests;
 `pnpm dataset:check` validates the frozen AVEN-007 dataset against its manifest.
+`pnpm attribution:check` checks that every commit after the frozen `aven-009`
+baseline keeps Claude as primary author and carries the owner's exact co-author
+trailer (it needs full Git history and is deliberately separate from
+`pnpm check`; it reads commit metadata and is not authentication).
 `pnpm db:migrate` creates or migrates the ignored local `data/aven.sqlite`; it
 does not record owner experience. `pnpm api:start --owner owner_local` declares
 a local owner and serves the AVEN-005 API on `127.0.0.1:4317` (loopback only);
@@ -120,9 +125,9 @@ aven/
                  web (placeholder)
   packages/      contracts, storage, ledger, runtime (AVEN-006), baseline
                  (AVEN-007), context-broker (AVEN-008), owner-model
-                 (AVEN-009 candidate); root, learning, eval, test-utils
+                 (AVEN-009); root, learning, eval, test-utils
                  (placeholders)
-  tooling/       scripts and bootstrap tests
+  tooling/       scripts, bootstrap tests and the AVEN-010 attribution gate
 ```
 
 `packages/contracts`, `packages/storage`, `packages/ledger`, `packages/runtime`,
@@ -159,8 +164,12 @@ task context selected from injected candidate sources, with no persistence,
 learning, correction handling or permission decision. AVEN-008 is frozen at tag
 `aven-008`. AVEN-009 adds only the Typed Owner Model: read-only, owner-isolated
 typed views and Broker sources over recorded state, with no writer, learning,
-correction handling, promotion or permission decision. Its implementation is
-complete on an isolated candidate branch, unmerged and untagged, pending final
-external review; AVEN-010 and later work remain deferred and not started. The
-AVEN-001 source summaries and experiment documents retain their historical
-milestone context; the current authorization is recorded in `AGENTS.md`.
+correction handling, promotion or permission decision. AVEN-009 is frozen at tag
+`aven-009`; the corrected AVEN-008 anchor is `4ea1bc5`, and SHAs such as
+`4174080` cited in frozen documents refer to the archived pre-attribution
+history. AVEN-010 adds explicit correction recording and immediate
+current-task/current-session overrides, separate from durable learning; it is in
+progress on an isolated branch, and AVEN-011 and later work remain deferred and
+not started. The AVEN-001 source summaries and experiment documents retain their
+historical milestone context; the current authorization is recorded in
+`AGENTS.md`.

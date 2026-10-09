@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aven experiment foundation, contracts, storage, AVEN-004 Experience Ledger, AVEN-005 local session API, AVEN-006 model runtime boundary, AVEN-007 A/B baselines with prebuilt eval dataset, AVEN-008 Context Broker and AVEN-009 Typed Owner Model (candidate)",
+  "description": "Aven experiment foundation, contracts, storage, AVEN-004 Experience Ledger, AVEN-005 local session API, AVEN-006 model runtime boundary, AVEN-007 A/B baselines with prebuilt eval dataset, AVEN-008 Context Broker and AVEN-009 Typed Owner Model (frozen), with AVEN-010 correction events in progress",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24 <25",
@@ -18,6 +18,7 @@
     "api:start": "node apps/api/src/cli.ts",
     "experiment:check": "node tooling/scripts/check-experiment.ts",
     "dataset:check": "node tooling/scripts/check-aven-007-dataset.ts",
+    "attribution:check": "node tooling/attribution/check-attribution.ts",
     "test": "vitest run --configLoader native",
     "check": "prettier --check . && tsc --project tsconfig.json --noEmit && tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/storage/tsconfig.json --noEmit && tsc --project packages/ledger/tsconfig.json --noEmit && tsc --project packages/runtime/tsconfig.json --noEmit && tsc --project packages/baseline/tsconfig.json --noEmit && tsc --project packages/context-broker/tsconfig.json --noEmit && tsc --project packages/owner-model/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit && node tooling/scripts/check-experiment.ts && vitest run --configLoader native"
   },

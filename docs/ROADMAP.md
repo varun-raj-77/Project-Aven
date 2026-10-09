@@ -13,9 +13,9 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-005 | Chat/session API                                      | Frozen at `aven-005`; loopback sessions, tasks, owner messages via Ledger, history; no model           |
 | AVEN-006 | Model/runtime abstraction                             | Frozen at `aven-006`; replaceable runtime boundary, `model_inference` output; no live provider         |
 | AVEN-007 | Naive Personalized baseline and prebuilt eval dataset | Frozen at `aven-007`; A/B baselines, dataset v2 (48 dev / 16 held-out); `not_run`                      |
-| AVEN-008 | Context Broker                                        | Frozen at `aven-008`; config v2 after independent review; transient candidates, no persistence         |
-| AVEN-009 | Typed Owner Model                                     | Implemented on candidate branch (patches 1-9); pending final review, Windows validation and freeze     |
-| AVEN-010 | Correction events and immediate session override      | Not started; linked correction, immediate effect, durable candidate separation                         |
+| AVEN-008 | Context Broker                                        | Frozen at `aven-008` (`4ea1bc5`); config v2 after independent review; transient candidates only        |
+| AVEN-009 | Typed Owner Model                                     | Frozen at `aven-009` (`80057a2`); read-only typed owner state, lineage, views, rebuild, Broker sources |
+| AVEN-010 | Correction events and immediate session override      | In progress (isolated branch); linked correction, immediate override, durable candidate separation     |
 | AVEN-011 | Action Proposal schema                                | Pending; typed request distinct from permission                                                        |
 | AVEN-012 | Root Policy Gateway                                   | Pending; external ALLOW/DENY/REQUIRE_OWNER_APPROVAL                                                    |
 | AVEN-013 | One sandbox tool and verifier                         | Pending; bounded action and observed outcome                                                           |
@@ -28,16 +28,21 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-020 | Frozen end-to-end A/B/C experiment                    | Pending; untouched final cases, full outcomes and limitations; evaluate before expansion               |
 
 No framework adapter is required; one is optional only when it directly serves
-the experiment. AVEN-008 is frozen at tag `aven-008` (`4174080`). Current
-authorization covers AVEN-009 only. Its implementation (patches 1-9, see
-[the AVEN-009 report](AVEN_009_REPORT.md)) is complete on an isolated candidate
-branch pending final external review, Windows validation and an explicitly
-authorized merge and tag; it is not merged, not tagged and not frozen. AVEN-010
-and later remain unauthorized and not started. AVEN-009 adds no live-model
-adapter and makes no C-versus-B claim. Neither AVEN-007 nor AVEN-008 adds a
-live-model adapter; a later, explicitly authorized step may add the first
-justified adapter behind the AVEN-006 interface and execute the frozen A/B
-baselines. AVEN-008 makes no C-versus-B claim.
+the experiment. AVEN-008 is frozen at tag `aven-008` (corrected anchor
+`4ea1bc537a55604cf2414fbe3886323934207382`). AVEN-009 is frozen at tag
+`aven-009` (`80057a217adb90132c5b6bc1c6a5c0f798db08c5`) after final external
+review and Windows validation (runner options
+`--maxWorkers=2 --testTimeout=30000`; no code change); see
+[the AVEN-009 report](AVEN_009_REPORT.md), which keeps its pre-freeze status
+header and pre-attribution commit SHAs as historical record. SHAs such as
+`4174080` cited in frozen documents refer to the archived pre-attribution
+history. Current authorization covers AVEN-010 only, patch by patch on an
+isolated branch (working plan and accepted decisions in `AGENTS.md`); it is not
+merged, not tagged and not frozen. AVEN-011 and later remain unauthorized and
+not started. No milestone so far adds a live-model adapter, runs the frozen A/B
+baselines against a real model or makes a C-versus-B claim; a later, explicitly
+authorized step may add the first justified adapter behind the AVEN-006
+interface.
 
 ## Longer-term gates, all deferred
 

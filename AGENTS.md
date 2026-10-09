@@ -3,23 +3,30 @@
 ## Authority and scope
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
-reveals a concrete fatal problem. Current authorized work is **AVEN-009 only**:
-the Typed Owner Model (`packages/owner-model`), implemented patch by patch.
-Patches 1-9 (implementation through documentation and reconciliation, report
-`docs/AVEN_009_REPORT.md`) are on the isolated candidate branch, pending final
-external review, Windows validation and an explicitly authorized merge and tag;
-AVEN-009 is not frozen, and only review corrections remain in scope. AVEN-001
-through AVEN-008 and MAINT-001 are frozen; the current baseline is tag
-`aven-008`, commit `4174080998d383fe78e8e4799e13103d42635151`. Do not
-semantically modify a frozen layer. Do not begin AVEN-010 or any later
-milestone. Owner-model work stays representation- and read-oriented: typed,
-owner-isolated, deterministic structures and views over the frozen contracts. It
-performs no learning, preference inference, correction detection or
-interpretation, negative-signal generation, promotion or trust decision,
-authority or permission decision, Root change, tool execution, or model/provider
-call. AVEN-009 commits belong only on an isolated candidate branch for external
-review: never push to `main`, merge, or create the `aven-009` tag. Existing
-research outside this repository is historical.
+reveals a concrete fatal problem. Current authorized work is **AVEN-010 only**:
+Correction Events and Immediate Session Overrides, implemented patch by patch on
+the isolated branch `claude/adoring-pasteur-hcc5oe`. Each patch stops for
+independent review and explicit authorization before the next begins; the
+current patch is recorded in the working plan below. AVEN-001 through AVEN-009
+and MAINT-001 are frozen. The current baseline is AVEN-009, tag `aven-009`,
+commit `80057a217adb90132c5b6bc1c6a5c0f798db08c5` (Windows validation passed
+with the test-runner options `--maxWorkers=2 --testTimeout=30000`, a runner
+adjustment, not a code change). The corrected AVEN-008 anchor is tag `aven-008`,
+commit `4ea1bc537a55604cf2414fbe3886323934207382`. Commit SHAs cited inside
+frozen reports, code and earlier tripwire comments (for example AVEN-008
+`4174080`, its configuration v1 `630369a` and the AVEN-009 candidate commits)
+refer to the pre-attribution history, which is archived separately and is never
+used as a baseline, merged or rebased against. Do not semantically modify a
+frozen layer, and do not begin AVEN-011 or any later milestone. AVEN-010 records
+explicit, structured owner corrections, preserves the original behavior and
+evidence, applies an immediate current-task or current-session override and
+exposes inspectable correction evidence for later learning. It performs no
+learning, preference inference, promotion or trust decision, durable owner-state
+write, correction-derived negative-retrieval learning, authority or permission
+decision, Root change, tool execution, or model/provider call. AVEN-010 commits
+belong only on the isolated branch for external review: never push to `main`,
+merge, or create the `aven-010` tag. Existing research outside this repository
+is historical.
 
 Read these sources completely before changing the design:
 
@@ -32,6 +39,79 @@ the Context Broker, AVEN-009 the Typed Owner Model and AVEN-010 corrections;
 success requires C to materially beat B, not only A. The current task's explicit
 instructions take precedence over both documents. `docs/AVEN_PRINCIPLES.md`
 records the invariants.
+
+## AVEN-010 working plan
+
+Accepted design (independent review): one new package, `packages/corrections`
+(`@aven/corrections`); every frozen layer stays byte-identical. Patches, each a
+single reviewed commit:
+
+1. Reconciliation of `AGENTS.md`, `docs/ROADMAP.md` and `README.md`, and the
+   commit attribution gate (`tooling/attribution/`, `pnpm attribution:check`).
+   **Current patch.**
+2. Package scaffold, fixed errors, and the AVEN-010 frozen-layer tripwire inside
+   the package (the AVEN-009 tripwire forbids additions to `tooling/tests`).
+3. Correction recorder: the only AVEN-010 write, one atomic Ledger
+   `owner_correction` append through the frozen Ledger and storage.
+4. Pure immediate-override resolver.
+5. Read-only Ledger correction history and correction-evidence index.
+6. Context Broker integration: current-instruction source, exact-target
+   suppression wrapper and exposure verification.
+7. Cross-layer adversarial, restart, mutation and performance campaign.
+8. AVEN-010 report and documentation.
+
+Accepted decisions:
+
+- **D1** Branch `claude/adoring-pasteur-hcc5oe`, from `aven-009`.
+- **D2** An in-process recorder in `@aven/corrections`; no HTTP route, and
+  `apps/api` stays unchanged. Owner origin remains declared, not authenticated.
+- **D3** `unspecified` applicability applies only to the origin task (the
+  correction event's envelope binding), labelled as such; without an origin task
+  it is recorded with no immediate effect.
+- **D4 (modified)** Only explicit correction-to-correction linkage (an `event`
+  target naming an earlier correction's event, or an `evidence` target naming
+  its evidence) supersedes an earlier correction, and only within the later
+  correction's own immediate scope. Sharing a target and category never
+  supersedes: both corrections stay active and the overlap is exposed as
+  unresolved, without interpreting text.
+- **D5** `permission` corrections are recorded only and deferred to Root
+  (AVEN-012). They are never emitted as context and never grant anything.
+- **D6** Immediate suppression sets the Broker's frozen suppression value
+  (`negativeRetrieval` 1) only on candidates whose reference exactly equals an
+  active correction target, only within that correction's immediate scope, by
+  wrapping the base sources. The AVEN-009 source configuration and the Broker
+  stay unchanged. This is distinct from future graded, correction-derived
+  negative retrieval (AVEN-014+) and from durable supersession or revocation
+  (AVEN-017/018).
+- **D7** A current-session correction is projected as a `current_instruction`
+  bound to the requesting task of that same session; the origin binding stays in
+  the Ledger.
+- **D8** Instruction candidates use confidence 1, salience 1 and
+  `negativeRetrieval` 0, and render only the corrected instruction, never
+  `originalBehavior`.
+- **D9 (modified)** Presence in the override view is not proof that the Context
+  Broker selected an instruction. The integration patch provides an explicit
+  exposure-verification boundary: a required immediate owner instruction missing
+  from the selected `ContextBundle` yields a fixed, fail-closed not-exposed
+  result, never a reported success. The frozen Broker is not modified.
+- **D10** The AVEN-010 frozen-layer tripwire lives in `packages/corrections`;
+  the attribution gate lives in `tooling/attribution` and runs as
+  `pnpm attribution:check`, outside the pinned `pnpm check`.
+- **D11** Claude remains the primary author; tooling-required Claude metadata
+  may remain; the owner's exact co-author trailer is mandatory.
+- **D12** The owner-local Ledger `sequence` is the only ordering key.
+
+Commit attribution (non-negotiable): every Claude-authored AVEN-010 commit has
+author and committer `Claude <noreply@anthropic.com>` and exactly one trailer
+`Co-authored-by: Varun Karthik <varunraj2117@gmail.com>` that Git parses in the
+final trailer block; owner-authored commits use the verified owner email; no
+merge commits; one reviewed patch is one commit and is never squashed. Before
+any push run `git show -s --format=fuller HEAD`, `git log -1 --format=%B HEAD`
+and `pnpm attribution:check`, which checks every commit after `aven-009`, not
+only `HEAD`. On any failure, stop, repair the unpushed commit and verify again.
+The gate fails closed on prose lines that combine co-author wording with the
+owner's name, so keep such wording out of commit bodies. It reads recorded
+commit metadata only; it is tooling discipline, not authentication.
 
 ## Architecture
 
@@ -88,9 +168,11 @@ Consequences:
   discipline, shared contracts, SQLite integrity, Ledger behavior, the local API
   boundary, the model-runtime boundary and model-output recording path, the
   AVEN-007 A/B baselines and dataset integrity, the AVEN-008 Context Broker's
-  selection mechanics, and the AVEN-009 owner-model intake, lineage,
-  lifecycle-claim, view, rebuild and context-source mechanics on synthetic data,
-  not a complete Aven runtime. Report limitations honestly.
+  selection mechanics, the AVEN-009 owner-model intake, lineage,
+  lifecycle-claim, view, rebuild and context-source mechanics, and the AVEN-010
+  commit attribution rules on synthetic Git repositories, all on synthetic data,
+  not a complete Aven runtime. Run `pnpm attribution:check` before every push.
+  Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -188,12 +270,17 @@ adding `@aven/context-broker`) adapts a genuine rebuilt model into four
 read-only sources for the unchanged Broker under the frozen, provisional,
 ordinal configuration `aven-009-owner-model-source-config-v1` (negativeRetrieval
 always 0); changing it requires a new version and evidence. Package and subpath
-separation is not process or security isolation. Other app/package directories
-remain placeholders. Tooling schemas still describe experimental metadata only.
-No live provider adapter or network model call, Strands or other framework
-adapter, public generation route, owner-state writer, learning algorithms,
-correction handling, negative-signal generation, routing, streaming, tool
-calling, Root enforcement, authentication, UI, execution, scorer, promotion
-controller, or agent orchestration in this milestone. Stop after each patch and
-report files, checks, assumptions, and deliberate deferrals for external review.
-Commit only to the isolated AVEN-009 candidate branch; do not merge or tag.
+separation is not process or security isolation. `tooling/attribution` holds the
+AVEN-010 commit attribution gate (`pnpm attribution:check`); it reads commit
+metadata and is not security. Other app/package directories remain placeholders.
+Tooling schemas still describe experimental metadata only. No correction
+recording, override resolution or correction context source exists yet; they
+arrive only in later authorized AVEN-010 patches. No live provider adapter or
+network model call, Strands or other framework adapter, public generation route,
+durable owner-state writer, learning algorithms, correction interpretation from
+free text, learned negative-signal generation, routing, streaming, tool calling,
+Root enforcement, authentication, UI, execution, scorer, promotion controller,
+or agent orchestration in this milestone. Stop after each patch and report
+files, checks, attribution status, assumptions, and deliberate deferrals for
+external review. Commit only to the isolated AVEN-010 branch; do not merge or
+tag.
