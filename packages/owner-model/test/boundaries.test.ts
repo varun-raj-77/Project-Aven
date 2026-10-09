@@ -302,7 +302,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code, patch 6 one task code)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code, patch 6 one task code, patch 7 one persisted code)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
@@ -314,6 +314,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       'invalid_lifecycle_claim',
       'invalid_owner_state_view',
       'active_task_conflict',
+      'invalid_persisted_owner_model',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -340,6 +341,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'An owner-state record is inconsistent with its category; no owner-state view was built',
       active_task_conflict:
         'Several active task states declare the same task binding; no active task view was built',
+      invalid_persisted_owner_model:
+        'Persisted owner state failed read-only reconstruction; no owner model was built',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -565,7 +568,10 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'timestamps.ts',
       'views.ts',
     ]);
-    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
+    // Patch 7: the only subdirectory is the persistence subpath.
+    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([
+      'persistence',
+    ]);
     for (const later of [
       'persistence.ts',
       'rebuild.ts',
@@ -632,6 +638,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       'fresh-process.test.ts',
       'intake.test.ts',
       'lineage.test.ts',
+      'persistence.test.ts',
       'views.test.ts',
     ]);
   });
@@ -939,7 +946,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     ).toEqual([]);
   });
 
-  it('declares only the production entry and depends only on contracts and zod', () => {
+  it('declares the root and persistence entries and only the reviewed dependencies', () => {
     const manifest = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as {
@@ -951,9 +958,15 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     };
     expect(manifest.name).toBe('@aven/owner-model');
     expect(manifest.private).toBe(true);
-    expect(manifest.exports).toEqual({ '.': './src/index.ts' });
+    // Patch 7: the ./persistence subpath and its two read dependencies.
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './persistence': './src/persistence/index.ts',
+    });
     expect(manifest.dependencies).toEqual({
       '@aven/contracts': 'workspace:*',
+      '@aven/ledger': 'workspace:*',
+      '@aven/storage': 'workspace:*',
       zod: '4.6.5',
     });
     expect(Object.keys(manifest.devDependencies).sort()).toEqual([
@@ -965,5 +978,197 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
   it('keeps the placeholder that the AVEN-008 tripwire pins, unchanged and empty', () => {
     const placeholder = readFileSync(new URL('../.gitkeep', import.meta.url));
     expect(placeholder.byteLength).toBe(0);
+  });
+});
+
+/**
+ * AVEN-009 patch 7: static regression tripwires for the read-only
+ * persistence subpath. Like the core tripwires, these are pattern checks
+ * over code (comments removed), not runtime isolation.
+ */
+const persistenceDir = new URL('../src/persistence/', import.meta.url);
+const persistenceEntries = readdirSync(persistenceDir, { withFileTypes: true });
+const persistenceFiles = persistenceEntries
+  .filter((e) => e.isFile())
+  .map((e) => e.name);
+const persistenceSource: Record<string, string> = Object.fromEntries(
+  persistenceFiles.map((f) => [
+    f,
+    code(readFileSync(new URL(f, persistenceDir), 'utf8')),
+  ]),
+);
+const persistenceCode = Object.values(persistenceSource).join('\n');
+
+const PERSISTENCE_IMPORTS: Record<string, ReadonlySet<string>> = {
+  '@aven/contracts': new Set([
+    'OwnerIdSchema',
+    'ActiveTaskState',
+    'DurableOwnerState',
+    'LearningTransition',
+    'OwnerId',
+  ]),
+  '@aven/ledger': new Set(['createLedger', 'StoredEvent']),
+  '@aven/storage': new Set(['deserializeContract', 'Storage']),
+};
+function persistenceImportViolations(text: string): string[] {
+  const found: string[] = [];
+  for (const m of text.matchAll(
+    /\b(?:import|export)\b\s*(?:type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?|\w+)?\s*from\s+(['"])([^'"]+)\2/gs,
+  )) {
+    const module = m[3] ?? '';
+    if (/^\.\.?\/[\w-]+\.ts$/.test(module)) continue;
+    const allowed = PERSISTENCE_IMPORTS[module];
+    const clause = m[1] ?? '';
+    if (!allowed || !clause.startsWith('{')) {
+      found.push(module);
+      continue;
+    }
+    for (const raw of clause.slice(1, -1).split(',')) {
+      const name = raw
+        .trim()
+        .replace(/^type\s+/, '')
+        .split(/\s+as\s+/)[0]!
+        .trim();
+      if (name && !allowed.has(name)) found.push(`${module}: ${name}`);
+    }
+  }
+  if (/\bimport\s*['"]|\bimport\s*\(|\brequire\s*\(/.test(text))
+    found.push('side-effect, dynamic or require import');
+  return found;
+}
+
+const PERSISTENCE_RULES: Record<string, RegExp> = {
+  'Context Broker, runtime, baseline, API or Root':
+    /@aven\/(context-broker|runtime|baseline|api|root)|ContextCandidate|confidence|salience|\bRoot\b|\bauthority\b|\bALLOW\b|PolicyDecision/,
+  'network, file, process or environment':
+    /\bnode:|readFile|writeFile|\bfs\.|\bfetch\b|WebSocket|child_process|\bspawn\s*\(|process\.env|\bglobalThis\b/,
+  'clock, randomness or timers':
+    /Date\.now|new\s+Date\s*\(|performance\.now|Math\.random|randomUUID|\bcrypto\b|\bset(Timeout|Interval|Immediate)\b/,
+  'writes, migration or Ledger append':
+    // SQL keywords are matched in upper case (as written in SQL) so that
+    // `Object.create` is not a false positive; lower-case SQL phrases too.
+    /appendEvent|\bmigrate\b|\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|PRAGMA|ATTACH)\b|\binsert\s+into\b|\bdelete\s+from\b|\bupdate\s+\w+\s+set\b|\.exec\s*\(|\.run\s*\(|\.pragma\s*\(|BEGIN\s+(IMMEDIATE|EXCLUSIVE)/,
+  'projection or event tables read directly':
+    /lifecycle_records|experience_events|\bevidence\s+WHERE|record_references|latest_learned/,
+  'writer or transition-application API':
+    /\b(save|write|update|delete|promote|revoke|supersede|apply|restore|insert)\w*\s*\(/i,
+  'projection inputs or selection':
+    /referenceTime|sessionId|taskId|buildDurableCategoryViews|buildActiveTaskView|current|effective|winner|trustedVersion/i,
+};
+
+describe('AVEN-009 owner-model persistence subpath tripwires (not runtime security)', () => {
+  it('keeps exactly the reviewed persistence modules and surface', async () => {
+    expect(persistenceFiles.sort()).toEqual(['index.ts', 'rebuild.ts']);
+    expect(persistenceEntries.filter((e) => !e.isFile())).toEqual([]);
+    const surface = await import('../src/persistence/index.ts');
+    expect(Object.keys(surface).sort()).toEqual(['rebuildOwnerModel']);
+  });
+
+  it('imports only the reviewed storage, Ledger and contract names and owner-model modules', () => {
+    expect(persistenceImportViolations(persistenceCode)).toEqual([]);
+    for (const bad of [
+      `import { createContextBroker } from '@aven/context-broker';`,
+      `import { migrate } from '@aven/storage';`,
+      `import { openStorage } from '@aven/storage';`,
+      `import { createLedger, LedgerError } from '@aven/ledger';`,
+      `import * as storage from '@aven/storage';`,
+      `import { readFileSync } from 'node:fs';`,
+      `import Database from 'better-sqlite3';`,
+      `const m = await import('@aven/storage');`,
+    ])
+      expect(persistenceImportViolations(bad), bad).not.toEqual([]);
+  });
+
+  for (const [rule, pattern] of Object.entries(PERSISTENCE_RULES))
+    it(`has no ${rule}`, () => {
+      expect(pattern.test(persistenceCode), rule).toBe(false);
+    });
+
+  it('rejects known-bad persistence samples', () => {
+    for (const [rule, bad] of [
+      ['writes, migration or Ledger append', `ledger.appendEvent(input);`],
+      ['writes, migration or Ledger append', `migrate(storage.sqlite);`],
+      [
+        'writes, migration or Ledger append',
+        `storage.sqlite.prepare('UPDATE learned_owner_state SET x = 1').run();`,
+      ],
+      [
+        'writes, migration or Ledger append',
+        `storage.sqlite.exec('DELETE FROM active_task_state');`,
+      ],
+      [
+        'writes, migration or Ledger append',
+        `const sql = 'INSERT INTO owners VALUES (?, ?)';`,
+      ],
+      [
+        'writes, migration or Ledger append',
+        `const sql = 'insert into owners values (?, ?)';`,
+      ],
+      [
+        'projection or event tables read directly',
+        `prepare('SELECT record_json FROM lifecycle_records WHERE owner_id = ?')`,
+      ],
+      [
+        'projection or event tables read directly',
+        `prepare('SELECT record_json FROM experience_events WHERE owner_id = ?')`,
+      ],
+      [
+        'writer or transition-application API',
+        `export function saveOwnerState(state) {}`,
+      ],
+      [
+        'writer or transition-application API',
+        `applyRollback(record, transition);`,
+      ],
+      [
+        'projection inputs or selection',
+        `rebuildOwnerModel(storage, ownerId, { referenceTime })`,
+      ],
+      [
+        'projection inputs or selection',
+        `const current = pickTrusted(history);`,
+      ],
+      [
+        'Context Broker, runtime, baseline, API or Root',
+        `return { kind: 'owner_state', confidence: 1 } as ContextCandidate;`,
+      ],
+      [
+        'Context Broker, runtime, baseline, API or Root',
+        `if (transition.authority.decision === 'ALLOW') trusted = true;`,
+      ],
+      ['clock, randomness or timers', `const now = Date.now();`],
+      [
+        'network, file, process or environment',
+        `const raw = readFileSync(path);`,
+      ],
+    ] as const)
+      expect(PERSISTENCE_RULES[rule]!.test(bad), bad).toBe(true);
+  });
+
+  it('selects only owner-scoped snapshot rows, ordered by identity', () => {
+    const sql = [...persistenceCode.matchAll(/'([^']*\bSELECT\b[^']*)'/gi)].map(
+      (m) => m[1],
+    );
+    expect(sql).toEqual([
+      'SELECT record_json FROM learned_owner_state WHERE owner_id = ? ORDER BY record_id, record_version',
+      'SELECT record_json FROM active_task_state WHERE owner_id = ? ORDER BY record_id, record_version',
+    ]);
+    // Every FROM in the code is one of those two owner-scoped selections.
+    expect((persistenceCode.match(/\bFROM\b/g) ?? []).length).toBe(2);
+  });
+
+  it('keeps the core pure: no core module reaches storage, the Ledger or the subpath', () => {
+    for (const [file, text] of Object.entries(source)) {
+      expect(/@aven\/(storage|ledger)/.test(text), file).toBe(false);
+      expect(/from\s+['"]\.\/persistence/.test(text), file).toBe(false);
+    }
+    expect(
+      importViolations(
+        `import { rebuildOwnerModel } from './persistence/index.ts';`,
+      ),
+    ).not.toEqual([]);
+    expect(
+      importViolations(`import { createLedger } from '@aven/ledger';`),
+    ).not.toEqual([]);
   });
 });

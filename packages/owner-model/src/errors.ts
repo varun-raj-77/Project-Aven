@@ -13,9 +13,10 @@
  * when their own behavior needs them. Patch 2 (owner-state intake) adds the
  * three identity codes, Patch 3 (durable lineage) adds two lineage codes,
  * Patch 4 (lifecycle claims) adds one claim code, Patch 5 (category views)
- * adds one view-consistency code and Patch 6 (active task view) adds one
- * task-conflict code; none carries a position, ID, version, category, path,
- * count, event, transition kind, time, task binding or owner.
+ * adds one view-consistency code, Patch 6 (active task view) adds one
+ * task-conflict code and Patch 7 (read-only rebuild) adds one persisted
+ * integrity code; none carries a position, ID, version, category, path,
+ * count, event, transition kind, time, task binding, table or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
@@ -27,7 +28,8 @@ export type OwnerModelErrorCode =
   | 'lineage_cycle'
   | 'invalid_lifecycle_claim'
   | 'invalid_owner_state_view'
-  | 'active_task_conflict';
+  | 'active_task_conflict'
+  | 'invalid_persisted_owner_model';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -49,6 +51,8 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'An owner-state record is inconsistent with its category; no owner-state view was built',
   active_task_conflict:
     'Several active task states declare the same task binding; no active task view was built',
+  invalid_persisted_owner_model:
+    'Persisted owner state failed read-only reconstruction; no owner model was built',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -71,6 +75,8 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'invalid_lifecycle_claim') return 'invalid_lifecycle_claim';
   if (value === 'invalid_owner_state_view') return 'invalid_owner_state_view';
   if (value === 'active_task_conflict') return 'active_task_conflict';
+  if (value === 'invalid_persisted_owner_model')
+    return 'invalid_persisted_owner_model';
   return 'internal_error';
 }
 
