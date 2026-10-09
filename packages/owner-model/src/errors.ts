@@ -12,9 +12,10 @@
  * The code set is deliberately minimal. Later AVEN-009 patches add codes only
  * when their own behavior needs them. Patch 2 (owner-state intake) adds the
  * three identity codes, Patch 3 (durable lineage) adds two lineage codes,
- * Patch 4 (lifecycle claims) adds one claim code and Patch 5 (category
- * views) adds one view-consistency code; none carries a position, ID,
- * version, category, path, count, event, transition kind, time or owner.
+ * Patch 4 (lifecycle claims) adds one claim code, Patch 5 (category views)
+ * adds one view-consistency code and Patch 6 (active task view) adds one
+ * task-conflict code; none carries a position, ID, version, category, path,
+ * count, event, transition kind, time, task binding or owner.
  */
 export type OwnerModelErrorCode =
   | 'invalid_input'
@@ -25,7 +26,8 @@ export type OwnerModelErrorCode =
   | 'invalid_lineage_reference'
   | 'lineage_cycle'
   | 'invalid_lifecycle_claim'
-  | 'invalid_owner_state_view';
+  | 'invalid_owner_state_view'
+  | 'active_task_conflict';
 
 const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
   invalid_input: 'The owner-model input is malformed; no owner state was read',
@@ -45,6 +47,8 @@ const messages: Readonly<Record<OwnerModelErrorCode, string>> = Object.freeze({
     'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
   invalid_owner_state_view:
     'An owner-state record is inconsistent with its category; no owner-state view was built',
+  active_task_conflict:
+    'Several active task states declare the same task binding; no active task view was built',
 });
 
 export const OWNER_MODEL_ERROR_CODES: readonly OwnerModelErrorCode[] =
@@ -66,6 +70,7 @@ function normalizeOwnerModelErrorCode(value: unknown): OwnerModelErrorCode {
   if (value === 'lineage_cycle') return 'lineage_cycle';
   if (value === 'invalid_lifecycle_claim') return 'invalid_lifecycle_claim';
   if (value === 'invalid_owner_state_view') return 'invalid_owner_state_view';
+  if (value === 'active_task_conflict') return 'active_task_conflict';
   return 'internal_error';
 }
 

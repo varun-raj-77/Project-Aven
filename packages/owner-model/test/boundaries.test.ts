@@ -53,6 +53,11 @@ const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'EventId',
     // Patch 5: the frozen timestamp schema, for the explicit reference time.
     'TimestampSchema',
+    // Patch 6: the frozen session and task ID schemas, for the exact binding.
+    'SessionIdSchema',
+    'TaskIdSchema',
+    'SessionId',
+    'TaskId',
   ]),
 };
 
@@ -297,7 +302,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
     return error;
   }
 
-  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code)', () => {
+  it('has a minimal, frozen code set (patch 2 adds three identity codes, patch 3 two lineage codes, patch 4 one claim code, patch 5 one view code, patch 6 one task code)', () => {
     expect(OWNER_MODEL_ERROR_CODES).toEqual([
       'invalid_input',
       'internal_error',
@@ -308,6 +313,7 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
       'lineage_cycle',
       'invalid_lifecycle_claim',
       'invalid_owner_state_view',
+      'active_task_conflict',
     ]);
     expect(Object.isFrozen(OWNER_MODEL_ERROR_CODES)).toBe(true);
   });
@@ -332,6 +338,8 @@ describe('AVEN-009 OwnerModelError (fixed public error surface)', () => {
         'Owner-state lifecycle claims do not agree with recorded transitions; no verified owner model was built',
       invalid_owner_state_view:
         'An owner-state record is inconsistent with its category; no owner-state view was built',
+      active_task_conflict:
+        'Several active task states declare the same task binding; no active task view was built',
     } as const;
     for (const code of OWNER_MODEL_ERROR_CODES) {
       const error = new OwnerModelError(code);
@@ -545,6 +553,7 @@ describe('AVEN-009 owner-model public surface (scaffold only)', () => {
 describe('AVEN-009 owner-model static regression tripwires (not runtime security)', () => {
   it('keeps production modules in a known, reviewed set with no later-patch modules', () => {
     expect(files.sort()).toEqual([
+      'active-task.ts',
       'ambient.ts',
       'canonical-text.ts',
       'claims.ts',
@@ -558,7 +567,6 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
     ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
     for (const later of [
-      'active-task.ts',
       'persistence.ts',
       'rebuild.ts',
       'context-source.ts',
@@ -618,6 +626,7 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
       f.endsWith('.test.ts'),
     );
     expect(tests.sort()).toEqual([
+      'active-task.test.ts',
       'boundaries.test.ts',
       'claims.test.ts',
       'fresh-process.test.ts',
@@ -654,6 +663,65 @@ describe('AVEN-009 owner-model static regression tripwires (not runtime security
         if (to) { visit(to); }
       }`),
     ).toEqual(['visit']);
+  });
+
+  it('keeps the active task view declarative: no expiry, clock, ranking, candidate, execution, coercion or durable state', () => {
+    // Patch 6 reads only intake.activeTasks, selects each ID's head, and
+    // tests exact binding and an active lifecycle. Expiry, Broker candidates,
+    // execution and persistence are later work or never.
+    const PATCH_6_SCOPE: Record<string, RegExp> = {
+      'expiry, age or time semantics':
+        /expir|\bttl\b|\bage\b|stale|timeout|timed.?out|freshness|closedAt|createdAt|referenceTime|asOf/i,
+      'ranking or Context Broker candidate':
+        /\brank|\bscore|relevan|salien|confidence|ContextCandidate|contextSource|candidate/i,
+      'execution, tools or proposals':
+        /execut|\btool|proposal|schedul|\bresume|\.outcome\b|completed|cancelled/i,
+      'durable state or category views':
+        /\.durable\b|DurableOwnerState|\bfacts\b|preferences|episodes|intentPatterns|procedures|categor/i,
+      'coercion of task IDs':
+        /\bString\s*\(|toString|`[^`]*\$\{|\+\s*''|''\s*\+|toLowerCase|toUpperCase|\.trim\s*\(/,
+      'Root, storage or Ledger':
+        /\bauthority\b|\bRoot\b|@aven\/(storage|ledger|context-broker)/,
+    };
+    const taskCode = source['active-task.ts']!;
+    for (const [label, pattern] of Object.entries(PATCH_6_SCOPE))
+      expect(pattern.test(taskCode), label).toBe(false);
+    for (const [label, bad] of [
+      [
+        'expiry, age or time semantics',
+        `if (age(head.metadata.createdAt) > TTL) continue;`,
+      ],
+      [
+        'expiry, age or time semantics',
+        `const expired = head.lifecycle.closedAt < now;`,
+      ],
+      [
+        'ranking or Context Broker candidate',
+        `return { kind: 'active_task', confidence: 1 } as ContextCandidate;`,
+      ],
+      [
+        'ranking or Context Broker candidate',
+        `matches.sort((a, b) => b.score - a.score);`,
+      ],
+      ['execution, tools or proposals', `executeTool(head.openLoops[0]);`],
+      [
+        'execution, tools or proposals',
+        `if (head.lifecycle.outcome === 'cancelled') return older;`,
+      ],
+      [
+        'durable state or category views',
+        `for (const record of intake.durable) if (match(record)) hit = record;`,
+      ],
+      ['durable state or category views', `views.facts.push(state);`],
+      ['coercion of task IDs', `const taskId = String(request.taskId);`],
+      ['coercion of task IDs', 'const key = `${sessionId}/${taskId}`;'],
+      ['coercion of task IDs', `const taskId = request.taskId.trim();`],
+      [
+        'Root, storage or Ledger',
+        `import { openStorage } from '@aven/storage';`,
+      ],
+    ] as const)
+      expect(PATCH_6_SCOPE[label]!.test(bad), bad).toBe(true);
   });
 
   it('keeps durable category views declared-only: no Root selection, Broker matching, task view, truth or transition following', () => {
