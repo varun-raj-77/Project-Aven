@@ -43,14 +43,26 @@ const ledgerSource = ledgerEntries
   .join('\n');
 
 /**
- * Exact named imports permitted per external module. Patch 2 imports nothing
- * from either; later patches extend these sets deliberately. Any other
- * module, any `node:*` module and any relative path leaving `src/` fails.
+ * Exact named imports permitted per external module for the ROOT modules.
+ * Patch 4 adds the frozen schemas the pure resolver validates with and the
+ * side-effect-free Proxy check of `node:util` (used by `inert.ts`). Any other
+ * module, any other `node:*` module and any relative path leaving `src/`
+ * fails.
  */
 const IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   zod: new Set(['z']),
-  '@aven/contracts': new Set<string>(),
+  'node:util': new Set(['types']),
+  '@aven/contracts': new Set([
+    'EvidenceRecordSchema',
+    'ExperienceEventSchema',
+    'OwnerIdSchema',
+    'SessionIdSchema',
+    'TaskIdSchema',
+    'TimestampSchema',
+  ]),
 };
+/** The one permitted `node:` import, removed before the capability rules run. */
+const PERMITTED_NODE_IMPORT = `import { types } from 'node:util';`;
 
 function importViolations(text: string): string[] {
   const found: string[] = [];
@@ -89,7 +101,7 @@ const RULES: Record<string, RegExp[]> = {
     [
       /@aven\/(storage|ledger|context-broker|owner-model|api|root|learning|eval|test-utils)\b/,
       /apps\/api|better-sqlite3|drizzle|\bsqlite\b|\.prepare\s*\(|openStorage|createLedger|appendEvent|replayEvents|listEvents|getEvent|createContextBroker|rebuildOwnerModel|\binsert\s+into\b|\bselect\s+.+\s+from\b/i,
-      /\b(experience_events|evidence|corrections|learned_owner_state|active_task_state|learning_candidates|lifecycle_records|record_references)\b\s*['"`]/,
+      /\b(experience_events|corrections|learned_owner_state|active_task_state|learning_candidates|lifecycle_records|record_references|record_versions)\b\s*['"`]/,
     ],
   'model runtime, AVEN-007 baseline or provider': [
     /@aven\/(runtime|baseline)|ModelRuntime|invokeModel|NaiveHistorySearch|searchHistory|BASELINE_/,
@@ -112,15 +124,18 @@ const RULES: Record<string, RegExp[]> = {
   timers: [
     /\bset(Timeout|Interval|Immediate)\b|\bclear(Timeout|Interval|Immediate)\b|queueMicrotask|\bscheduler\./,
   ],
-  'correction recording or Ledger write (patch 3)': [
-    /recordOwnerCorrection|record(Owner)?Correction|owner_correction|OwnerCorrectionSchema|CorrectionTargetSchema|ExperienceEvent|EvidenceRecord|evidenceIds|\breceipt\s*[:=]/,
+  'correction recording or Ledger write (the ./ledger subpath only)': [
+    /recordOwnerCorrection|record(Owner)?Correction|OwnerCorrectionSchema|CorrectionTargetSchema|EventInput|EvidenceInput|\breceipt\s*[:=]/,
   ],
-  'override resolution, history or context source (patches 4-6)': [
-    /resolve(Immediate)?(Correction|Override)|override|applicab|current_task|current_session|current_instruction|ContextSource|ContextCandidate|readCorrectionHistory|listCorrectionEvidence/i,
-    /negativeRetrieval|salience|confidence|candidateId|suppress|\brank|\bscore\b|exposure|\bexposed\b/i,
+  'persisted history or Context Broker integration (patches 5-6)': [
+    /readCorrectionHistory|listCorrectionEvidence|current_instruction|ContextSource|ContextCandidate|ContextBundle|override/i,
+    /negativeRetrieval|salience|confidence|candidateId|\brank|\bscore\b|exposure|\bexposed\b/i,
+  ],
+  'original behavior or durable scope hint in immediate resolution': [
+    /originalBehavior|durableScopeHint/,
   ],
   'state mutation, learning or promotion': [
-    /promot|demot|rollback|rolledBack|markTrusted|grantTrust|setLifecycle|assignLifecycle|upgrad|downgrad|supersed|revok/i,
+    /promot|demot|rollback|rolledBack|markTrusted|grantTrust|setLifecycle|assignLifecycle|upgrad|downgrad|markSuperseded|setSuperseded|revok/i,
     /status\s*:\s*['"`](observed|validated|trusted|superseded|revoked|candidate|promoted|active|closed)['"`]/,
     /inferPreference|detectCorrection|generateHypothes|candidateGenerat|LearningCandidate|\bhypothesis\b|\blearn(s|ed|ing)?\b/i,
   ],
@@ -133,8 +148,20 @@ const RULES: Record<string, RegExp[]> = {
     /reasoning|chainOfThought|chain_of_thought|\bthoughts?\b|rationale|scratchpad/i,
   ],
 };
+/**
+ * Text the rules see: the permitted `node:util` import and the frozen
+ * `'permission'` category literal (a recorded category, never authority) are
+ * removed first; every other occurrence still counts.
+ */
+const ruleText: Record<string, (text: string) => string> = {
+  'network, file, process or environment capability': (t) =>
+    t.replaceAll(PERMITTED_NODE_IMPORT, ''),
+  'authority, approval, Root or tools': (t) =>
+    t.replaceAll(`=== 'permission'`, ''),
+};
 function violations(rule: string, text: string): string[] {
-  return RULES[rule]!.filter((p) => p.test(text)).map(String);
+  const prepared = (ruleText[rule] ?? ((t: string) => t))(text);
+  return RULES[rule]!.filter((p) => p.test(prepared)).map(String);
 }
 
 const KNOWN_BAD: Record<string, string[]> = {
@@ -161,6 +188,7 @@ const KNOWN_BAD: Record<string, string[]> = {
     `await fetch('https://api.example.invalid')`,
     `const transport = 'node:https';`,
     `import { readFileSync } from 'node:fs';`,
+    `import { types, inspect } from 'node:util';`,
     `const key = process.env.PROVIDER_KEY;`,
     `globalThis['fet' + 'ch']('x')`,
     `execFileSync('git', ['log'])`,
@@ -177,20 +205,23 @@ const KNOWN_BAD: Record<string, string[]> = {
     `import { randomBytes } from 'node:crypto';`,
   ],
   timers: [`setTimeout(expire, 1000)`, `queueMicrotask(f)`],
-  'correction recording or Ledger write (patch 3)': [
+  'correction recording or Ledger write (the ./ledger subpath only)': [
     `export function recordOwnerCorrection(storage, submission) {}`,
-    `const event = { eventType: 'owner_correction' };`,
     `import { OwnerCorrectionSchema } from '@aven/contracts';`,
+    `const event: EventInput = build();`,
     `const receipt = { accepted: true };`,
   ],
-  'override resolution, history or context source (patches 4-6)': [
-    `export function resolveImmediateCorrections(history, binding) {}`,
-    `const kind = 'current_session';`,
+  'persisted history or Context Broker integration (patches 5-6)': [
+    `const history = readCorrectionHistory(storage, owner);`,
     `const source = { kind: 'current_instruction' };`,
     `candidate.signals.negativeRetrieval = 1;`,
     `const salience = 1;`,
-    `function suppress(candidate) {}`,
     `const sessionOverride = {};`,
+    `return { exposure: 'selected' };`,
+  ],
+  'original behavior or durable scope hint in immediate resolution': [
+    `instruction: payload.originalBehavior,`,
+    `if (payload.durableScopeHint.kind === 'global') widen();`,
   ],
   'state mutation, learning or promotion': [
     `export function promote(item) {}`,
@@ -204,6 +235,8 @@ const KNOWN_BAD: Record<string, string[]> = {
     `return { decision: 'ALLOW' };`,
     `import { PolicyDecisionSchema } from '@aven/contracts';`,
     `if (category === 'permission') permissions.add(x);`,
+    `const allowed = category === 'permission' && grant(x);`,
+    `authorize(correction.category);`,
     `const isAuthorized = true;`,
     `executeTool(proposal)`,
   ],
@@ -264,6 +297,8 @@ const EXPECTED_MESSAGES = {
     'A correction identifier is already in use for this owner; nothing was recorded',
   storage_failure:
     'Correction storage failed; no correction receipt was issued',
+  invalid_correction_history:
+    'The correction history or query is malformed or inconsistent; no correction view was built',
   internal_error:
     'The corrections package failed an internal consistency check; no correction receipt was issued',
 } as const;
@@ -276,6 +311,7 @@ describe('AVEN-010 CorrectionError (fixed public error surface)', () => {
       'unresolved_target',
       'identifier_collision',
       'storage_failure',
+      'invalid_correction_history',
       'internal_error',
     ]);
     expect(Object.isFrozen(CORRECTION_ERROR_CODES)).toBe(true);
@@ -415,22 +451,27 @@ describe('AVEN-010 CorrectionError (fixed public error surface)', () => {
 });
 
 describe('AVEN-010 corrections public surface (scaffold only)', () => {
-  it('exports exactly identity and the error surface, and nothing that records, resolves or decides', () => {
+  it('exports exactly identity, the error surface and the pure resolver, and nothing that records or decides', () => {
     expect(Object.keys(publicApi).sort()).toEqual(
       [
         'AVEN_010_CORRECTIONS_VERSION',
         'CORRECTIONS_CONFIG',
         'CORRECTION_ERROR_CODES',
         'CorrectionError',
+        'IMMEDIATE_RESOLUTION_VERSION',
+        'resolveImmediateCorrections',
       ].sort(),
     );
     const functions = Object.entries(publicApi).filter(
       ([, value]) => typeof value === 'function',
     );
-    // The only callable export is the error class: nothing records a
-    // correction, mutates state, learns, promotes, decides authority or
-    // executes a tool.
-    expect(functions.map(([name]) => name)).toEqual(['CorrectionError']);
+    // The only callables are the error class and the pure resolver: nothing
+    // records a correction, mutates state, learns, promotes, decides
+    // authority or executes a tool.
+    expect(functions.map(([name]) => name).sort()).toEqual([
+      'CorrectionError',
+      'resolveImmediateCorrections',
+    ]);
     for (const [name, value] of Object.entries(publicApi))
       if (typeof value === 'object')
         expect(Object.isFrozen(value), name).toBe(true);
@@ -449,6 +490,16 @@ describe('AVEN-010 corrections public surface (scaffold only)', () => {
     const fresh = await import('../src/index.ts');
     for (const code of fresh.CORRECTION_ERROR_CODES)
       JSON.stringify(new fresh.CorrectionError(code));
+    const view = fresh.resolveImmediateCorrections(
+      { ownerId: 'owner_synthetic', entries: [] },
+      {
+        ownerId: 'owner_synthetic',
+        sessionId: 'session_synthetic',
+        taskId: 'task_synthetic',
+      },
+      { referenceTime: '2026-10-10T00:00:00Z', throughSequence: null },
+    );
+    expect(view.active).toEqual([]);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 
@@ -459,7 +510,13 @@ describe('AVEN-010 corrections public surface (scaffold only)', () => {
 
 describe('AVEN-010 corrections static regression tripwires (not runtime security)', () => {
   it('keeps production modules in a known, reviewed set (root plus the ledger subpath only)', () => {
-    expect(files.sort()).toEqual(['config.ts', 'errors.ts', 'index.ts']);
+    expect(files.sort()).toEqual([
+      'config.ts',
+      'errors.ts',
+      'index.ts',
+      'inert.ts',
+      'resolve.ts',
+    ]);
     expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([
       'ledger',
     ]);
@@ -646,6 +703,7 @@ const LEDGER_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   '@aven/storage': new Set(['Storage']),
   '../config.ts': new Set(['AVEN_010_CORRECTIONS_VERSION']),
   '../errors.ts': new Set(['CorrectionError', 'CorrectionErrorCode']),
+  '../inert.ts': new Set(['inertCopy']),
   './record.ts': new Set([
     'recordOwnerCorrection',
     'CorrectionIdPrefix',

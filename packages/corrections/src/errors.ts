@@ -13,7 +13,9 @@
  * Every message is owner-local: "does not exist for this owner" is the same
  * whether an identifier is missing or belongs to someone else. The code set
  * is the one accepted in the AVEN-010 design; later patches use these codes
- * and add none before their own behavior needs one.
+ * and add none before their own behavior needs one. Patch 4 (the pure
+ * immediate-override resolver) adds `invalid_correction_history`, which never
+ * says which record, owner, sequence or field was wrong.
  */
 export type CorrectionErrorCode =
   | 'invalid_submission'
@@ -21,6 +23,7 @@ export type CorrectionErrorCode =
   | 'unresolved_target'
   | 'identifier_collision'
   | 'storage_failure'
+  | 'invalid_correction_history'
   | 'internal_error';
 
 const messages: Readonly<Record<CorrectionErrorCode, string>> = Object.freeze({
@@ -34,6 +37,8 @@ const messages: Readonly<Record<CorrectionErrorCode, string>> = Object.freeze({
     'A correction identifier is already in use for this owner; nothing was recorded',
   storage_failure:
     'Correction storage failed; no correction receipt was issued',
+  invalid_correction_history:
+    'The correction history or query is malformed or inconsistent; no correction view was built',
   internal_error:
     'The corrections package failed an internal consistency check; no correction receipt was issued',
 });
@@ -60,6 +65,8 @@ function normalizeCorrectionErrorCode(value: unknown): CorrectionErrorCode {
       return 'identifier_collision';
     case 'storage_failure':
       return 'storage_failure';
+    case 'invalid_correction_history':
+      return 'invalid_correction_history';
     default:
       return 'internal_error';
   }

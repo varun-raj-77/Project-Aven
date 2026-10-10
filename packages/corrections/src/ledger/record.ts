@@ -22,6 +22,7 @@ import {
 import type { Storage } from '@aven/storage';
 import { AVEN_010_CORRECTIONS_VERSION } from '../config.ts';
 import { CorrectionError, type CorrectionErrorCode } from '../errors.ts';
+import { inertCopy } from '../inert.ts';
 
 /**
  * AVEN-010 patch 3: the in-process owner-correction recorder
@@ -109,72 +110,10 @@ const fail = (code: CorrectionErrorCode): never => {
   throw new CorrectionError(code);
 };
 
-/** Internal sentinel for a rejected raw value; it never leaves this module. */
-const REJECT = Object.freeze({ rejected: true });
-
-/**
- * Copies caller data into inert null-prototype objects and plain arrays,
- * WITHOUT running caller code: Proxies are refused before any reflective
- * read, only own enumerable data properties are read (an accessor is refused
- * unread), symbol keys, non-plain prototypes, sparse or decorated arrays,
- * functions, undefined, bigint and non-finite numbers are refused, and the
- * depth, node, array and string bounds hold. Inherited fields are never
- * read. The realm's own intrinsics are trusted, as in AVEN-009.
- */
-function inert(value: unknown, depth: number, budget: { nodes: number }) {
-  budget.nodes += 1;
-  if (budget.nodes > SUBMISSION_LIMITS.maxNodes) throw REJECT;
-  if (typeof value === 'string') {
-    if (value.length > SUBMISSION_LIMITS.maxStringLength) throw REJECT;
-    return value;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw REJECT;
-    return value;
-  }
-  if (typeof value === 'boolean' || value === null) return value;
-  if (typeof value !== 'object') throw REJECT;
-  if (depth >= SUBMISSION_LIMITS.maxDepth || types.isProxy(value)) throw REJECT;
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  const keys = Reflect.ownKeys(value);
-  const read = (key: string): unknown => {
-    const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
-      throw REJECT;
-    return inert(descriptor.value, depth + 1, budget);
-  };
-  if (Array.isArray(value)) {
-    if (prototype !== Array.prototype) throw REJECT;
-    const length = keys.length - 1;
-    if (length > SUBMISSION_LIMITS.maxArrayLength) throw REJECT;
-    const lengthDescriptor = Reflect.getOwnPropertyDescriptor(value, 'length');
-    if (lengthDescriptor?.value !== length) throw REJECT;
-    const copy: unknown[] = [];
-    for (let i = 0; i < length; i += 1) copy.push(read(String(i)));
-    return copy;
-  }
-  if (prototype !== Object.prototype && prototype !== null) throw REJECT;
-  const copy = Object.create(null) as Record<string, unknown>;
-  for (const key of keys) {
-    if (typeof key !== 'string') throw REJECT;
-    Object.defineProperty(copy, key, {
-      value: read(key),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
-  }
-  return copy;
-}
-
 function parseSubmission(submission: unknown) {
-  let copy: unknown;
-  try {
-    copy = inert(submission, 0, { nodes: 0 });
-  } catch {
-    return fail('invalid_submission');
-  }
-  const parsed = SubmissionSchema.safeParse(copy);
+  const inert = inertCopy(submission, SUBMISSION_LIMITS);
+  if (inert === undefined) return fail('invalid_submission');
+  const parsed = SubmissionSchema.safeParse(inert.copy);
   return parsed.success ? parsed.data : fail('invalid_submission');
 }
 
