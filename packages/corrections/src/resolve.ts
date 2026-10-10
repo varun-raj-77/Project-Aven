@@ -47,7 +47,9 @@ import { inertCopy, type InertLimits } from './inert.ts';
  *     even if the superseding correction is itself corrected later: no
  *     resurrection. Shared targets or categories never supersede; active
  *     corrections with an identical structured target are reported as an
- *     unresolved overlap. Text is never interpreted.
+ *     unresolved overlap. Text is never interpreted. Linkage is found in one
+ *     ascending pass over exact-identity indexes (Codex audit F2, remediation
+ *     R2), so this step is linear in the applicable corrections.
  *   - SUPPRESSION targets come only from ACTIVE corrections' structured
  *     targets; `unidentified` targets have none.
  *   - EVIDENCE: each correction's own evidence must be `recorded_text` whose
@@ -243,17 +245,20 @@ function validate(history: z.output<typeof HistorySchema>): Entry[] {
       return invalid();
     sequences.add(entry.sequence);
     eventIds.add(event.id);
-    const named = event.evidenceIds;
+    // Exact membership by Set (linear in the event's evidence, not
+    // quadratic); the size checks still reject duplicate IDs and unpaired
+    // records exactly as before.
+    const named = new Set(event.evidenceIds);
     if (
-      new Set(named).size !== named.length ||
-      entry.evidence.length !== named.length
+      named.size !== event.evidenceIds.length ||
+      entry.evidence.length !== named.size
     )
       return invalid();
     for (const record of entry.evidence) {
       if (
         record.ownerId !== history.ownerId ||
         record.eventId !== event.id ||
-        !named.includes(record.id) ||
+        !named.has(record.id) ||
         evidenceIds.has(record.id)
       )
         return invalid();
@@ -335,7 +340,7 @@ function asOf(
   return included;
 }
 
-interface Applicable {
+export interface Applicable {
   readonly entry: Entry;
   readonly label: ImmediateApplicabilityLabel;
   readonly origin: { sessionId: string; taskId: string | null };
@@ -392,20 +397,59 @@ function applicability(
   }
 }
 
-/** Explicit correction-to-correction linkage: event ID or exact own evidence. */
-function corrects(later: Entry, earlier: Entry): boolean {
-  const target = later.event.payload.target;
-  const own = earlier.event.payload.evidence;
-  return (
-    (target.kind === 'event' && target.eventId === earlier.event.id) ||
-    (target.kind === 'evidence' &&
-      target.reference.evidenceId === own.evidenceId &&
-      target.reference.eventId === own.eventId)
-  );
-}
+/** Index key of an exact evidence reference (evidence ID, event ID). */
+const evidenceKey = (evidenceId: string, eventId: string) =>
+  JSON.stringify([evidenceId, eventId]);
 
 const isPermission = (entry: Entry) =>
   entry.event.payload.category === 'permission';
+
+/**
+ * Explicit linkage, in one ascending-sequence pass (no pairwise search):
+ * each applicable non-permission correction looks up its own structured
+ * target among the EARLIER applicable non-permission corrections only, by
+ * exact event ID or exact own evidence reference, and is indexed after the
+ * lookup (so never matches itself or a later one). A correction has one
+ * target, so it supersedes at most one earlier correction, and appending in
+ * ascending order keeps every `supersededBy` list in sequence order. The
+ * superseder need not stay active. Additional evidence is never indexed.
+ * Exported for this package's own complexity tests only; not a package
+ * export.
+ */
+export function linkSupersessions(
+  applicable: readonly Applicable[],
+): Map<string, string[]> {
+  const supersededBy = new Map<string, string[]>();
+  const earlierEvents = new Set<string>();
+  const byOwnEvidence = new Map<string, string>();
+  for (const item of applicable) {
+    const event = item.entry.event;
+    if (isPermission(item.entry)) continue;
+    const target = event.payload.target;
+    const earlier =
+      target.kind === 'event'
+        ? earlierEvents.has(target.eventId)
+          ? target.eventId
+          : undefined
+        : target.kind === 'evidence'
+          ? byOwnEvidence.get(
+              evidenceKey(
+                target.reference.evidenceId,
+                target.reference.eventId,
+              ),
+            )
+          : undefined;
+    if (earlier !== undefined) {
+      const list = supersededBy.get(earlier) ?? [];
+      list.push(event.id);
+      supersededBy.set(earlier, list);
+    }
+    earlierEvents.add(event.id);
+    const own = event.payload.evidence;
+    byOwnEvidence.set(evidenceKey(own.evidenceId, own.eventId), event.id);
+  }
+  return supersededBy;
+}
 
 function copyTarget(entry: Entry): StructuredTarget {
   const t = entry.event.payload.target;
@@ -517,16 +561,7 @@ function resolve(
     .map((entry) => applicability(entry, binding))
     .filter((item): item is Applicable => item !== undefined);
 
-  const supersededBy = new Map<string, string[]>();
-  for (const [i, earlier] of applicable.entries()) {
-    if (isPermission(earlier.entry)) continue;
-    for (const later of applicable.slice(i + 1))
-      if (!isPermission(later.entry) && corrects(later.entry, earlier.entry)) {
-        const list = supersededBy.get(earlier.entry.event.id) ?? [];
-        list.push(later.entry.event.id);
-        supersededBy.set(earlier.entry.event.id, list);
-      }
-  }
+  const supersededBy = linkSupersessions(applicable);
 
   const active: ActiveCorrection[] = [];
   const inactive: InactiveCorrection[] = [];
