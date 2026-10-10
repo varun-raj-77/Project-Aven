@@ -12,7 +12,7 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/storage/tsconfig.json --noEmit && tsc --project packages/ledger/tsconfig.json --noEmit && tsc --project packages/runtime/tsconfig.json --noEmit && tsc --project packages/baseline/tsconfig.json --noEmit && tsc --project packages/context-broker/tsconfig.json --noEmit && tsc --project packages/owner-model/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit",
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/storage/tsconfig.json --noEmit && tsc --project packages/ledger/tsconfig.json --noEmit && tsc --project packages/runtime/tsconfig.json --noEmit && tsc --project packages/baseline/tsconfig.json --noEmit && tsc --project packages/context-broker/tsconfig.json --noEmit && tsc --project packages/owner-model/tsconfig.json --noEmit && tsc --project packages/corrections/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit",
     "db:migrate": "node packages/storage/src/migrate-cli.ts",
     "db:test": "vitest run --configLoader native packages/storage/test",
     "api:start": "node apps/api/src/cli.ts",
@@ -20,7 +20,7 @@
     "dataset:check": "node tooling/scripts/check-aven-007-dataset.ts",
     "attribution:check": "node tooling/attribution/check-attribution.ts",
     "test": "vitest run --configLoader native",
-    "check": "prettier --check . && tsc --project tsconfig.json --noEmit && tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/storage/tsconfig.json --noEmit && tsc --project packages/ledger/tsconfig.json --noEmit && tsc --project packages/runtime/tsconfig.json --noEmit && tsc --project packages/baseline/tsconfig.json --noEmit && tsc --project packages/context-broker/tsconfig.json --noEmit && tsc --project packages/owner-model/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit && node tooling/scripts/check-experiment.ts && vitest run --configLoader native"
+    "check": "prettier --check . && tsc --project tsconfig.json --noEmit && tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/storage/tsconfig.json --noEmit && tsc --project packages/ledger/tsconfig.json --noEmit && tsc --project packages/runtime/tsconfig.json --noEmit && tsc --project packages/baseline/tsconfig.json --noEmit && tsc --project packages/context-broker/tsconfig.json --noEmit && tsc --project packages/owner-model/tsconfig.json --noEmit && tsc --project packages/corrections/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit && node tooling/scripts/check-experiment.ts && vitest run --configLoader native"
   },
   "devDependencies": {
     "@types/node": "24.10.13",

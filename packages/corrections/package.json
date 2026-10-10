@@ -1,0 +1,22 @@
+{
+  "name": "@aven/corrections",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-010 correction events and immediate session overrides (scaffold): package identity and fixed errors only; no recorder, resolver, Ledger reader, context source, learning, storage or authority",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/corrections/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
