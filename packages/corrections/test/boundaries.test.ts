@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as publicApi from '../src/index.ts';
+import * as ledgerApi from '../src/ledger/index.ts';
 import {
   AVEN_010_CORRECTIONS_VERSION,
   CORRECTION_ERROR_CODES,
@@ -11,8 +12,10 @@ import {
 } from '../src/index.ts';
 
 /**
- * AVEN-010 patch 2: scaffold behavior plus static REGRESSION TRIPWIRES over
- * the corrections production source. The static rules are pattern checks that
+ * AVEN-010 patches 2-3: scaffold behavior plus static REGRESSION TRIPWIRES
+ * over the corrections production source. The ROOT modules (`src/*.ts`) stay
+ * pure; only the `./ledger` subpath (`src/ledger/*.ts`, patch 3) may use
+ * storage and the Ledger, under its own rules below. The static rules are pattern checks that
  * make obvious regressions visible in review; they are NOT security
  * guarantees and can be bypassed by deliberately obfuscated code. Every rule
  * is also run against known-bad samples, so a weakened rule fails here. Later
@@ -31,6 +34,13 @@ const source: Record<string, string> = Object.fromEntries(
   files.map((f) => [f, code(readFileSync(new URL(f, srcDir), 'utf8'))]),
 );
 const all = Object.values(source).join('\n');
+
+const ledgerDir = new URL('../src/ledger/', import.meta.url);
+const ledgerEntries = readdirSync(ledgerDir, { withFileTypes: true });
+const ledgerSource = ledgerEntries
+  .filter((e) => e.isFile())
+  .map((e) => code(readFileSync(new URL(e.name, ledgerDir), 'utf8')))
+  .join('\n');
 
 /**
  * Exact named imports permitted per external module. Patch 2 imports nothing
@@ -448,9 +458,16 @@ describe('AVEN-010 corrections public surface (scaffold only)', () => {
 });
 
 describe('AVEN-010 corrections static regression tripwires (not runtime security)', () => {
-  it('keeps production modules in a known, reviewed set with no behavior modules yet', () => {
+  it('keeps production modules in a known, reviewed set (root plus the ledger subpath only)', () => {
     expect(files.sort()).toEqual(['config.ts', 'errors.ts', 'index.ts']);
-    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([]);
+    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([
+      'ledger',
+    ]);
+    expect(
+      ledgerEntries
+        .map((e) => `${e.isFile() ? 'file' : 'dir'}:${e.name}`)
+        .sort(),
+    ).toEqual(['file:index.ts', 'file:record.ts']);
   });
 
   it('imports only zod, allowlisted frozen contract names and its own modules', () => {
@@ -507,13 +524,18 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
     [key: string]: unknown;
   };
 
-  it('declares only the root entry and depends only on contracts and zod', () => {
+  it('declares the root entry and the ledger subpath only, with storage and Ledger for that subpath', () => {
     expect(manifest.name).toBe('@aven/corrections');
     expect(manifest.private).toBe(true);
     expect(manifest.type).toBe('module');
-    expect(manifest.exports).toEqual({ '.': './src/index.ts' });
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './ledger': './src/ledger/index.ts',
+    });
     expect(manifest.dependencies).toEqual({
       '@aven/contracts': 'workspace:*',
+      '@aven/ledger': 'workspace:*',
+      '@aven/storage': 'workspace:*',
       zod: '4.6.5',
     });
     expect(manifest.devDependencies).toEqual({
@@ -532,17 +554,22 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
     });
   });
 
-  it('resolves contracts and zod through its own workspace links, and links nothing else', () => {
+  it('resolves contracts, Ledger, storage and zod through its own workspace links, and links nothing else', () => {
     // Checks the package-local links pnpm installed for this manifest. A
     // runtime require.resolve is not used: pnpm's bin shims put the hoisted
     // node_modules/.pnpm/node_modules (holding every workspace package) on
     // NODE_PATH, so it would depend on how the test runner was launched.
     const local = new URL('../node_modules/', import.meta.url);
     const linked = (name: string) => realpathSync(new URL(name, local));
-    expect(readdirSync(new URL('@aven/', local)).sort()).toEqual(['contracts']);
-    expect(linked('@aven/contracts')).toBe(
-      realpathSync(new URL('../../contracts/', import.meta.url)),
-    );
+    expect(readdirSync(new URL('@aven/', local)).sort()).toEqual([
+      'contracts',
+      'ledger',
+      'storage',
+    ]);
+    for (const name of ['contracts', 'ledger', 'storage'])
+      expect(linked(`@aven/${name}`)).toBe(
+        realpathSync(new URL(`../../${name}/`, import.meta.url)),
+      );
     expect(
       readdirSync(local)
         .filter((n) => !n.startsWith('.'))
@@ -586,5 +613,243 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
       compilerOptions: { types: ['node'] },
       include: ['src/**/*.ts', 'test/**/*.ts'],
     });
+  });
+});
+
+/**
+ * The `./ledger` subpath (patch 3): exact named imports per module. It is the
+ * only place allowed to reach storage and the Ledger, the default clock
+ * (`new Date()`) and the default identifier source (`randomUUID`).
+ */
+const LEDGER_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
+  zod: new Set(['z']),
+  'node:crypto': new Set(['randomUUID']),
+  'node:util': new Set(['types']),
+  '@aven/contracts': new Set([
+    'CorrectionTargetSchema',
+    'EventIdSchema',
+    'EvidenceIdSchema',
+    'EvidenceRecordSchema',
+    'ExperienceEventSchema',
+    'OwnerCorrectionSchema',
+    'OwnerIdSchema',
+    'ScopeSchema',
+    'SessionIdSchema',
+    'TaskIdSchema',
+  ]),
+  '@aven/ledger': new Set([
+    'createLedger',
+    'LedgerError',
+    'EventInput',
+    'EvidenceInput',
+  ]),
+  '@aven/storage': new Set(['Storage']),
+  '../config.ts': new Set(['AVEN_010_CORRECTIONS_VERSION']),
+  '../errors.ts': new Set(['CorrectionError', 'CorrectionErrorCode']),
+  './record.ts': new Set([
+    'recordOwnerCorrection',
+    'CorrectionIdPrefix',
+    'CorrectionReceipt',
+    'CorrectionRecordingOptions',
+    'CorrectionSubmission',
+  ]),
+};
+
+function ledgerImportViolations(text: string): string[] {
+  const found: string[] = [];
+  for (const m of text.matchAll(
+    /\b(?:import|export)\b\s*(?:type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?|\w+)?\s*from\s+(['"])([^'"]+)\2/gs,
+  )) {
+    const module = m[3] ?? '';
+    const allowed = LEDGER_IMPORT_ALLOWLIST[module];
+    const clause = m[1] ?? '';
+    if (!allowed || !clause.startsWith('{')) {
+      found.push(module);
+      continue;
+    }
+    for (const raw of clause.slice(1, -1).split(',')) {
+      const name = raw
+        .trim()
+        .replace(/^type\s+/, '')
+        .split(/\s+as\s+/)[0]!
+        .trim();
+      if (name && !allowed.has(name)) found.push(`${module}: ${name}`);
+    }
+  }
+  if (/\bimport\s*['"]/.test(text)) found.push('side-effect import');
+  if (/\bimport\s*\(/.test(text)) found.push('dynamic import');
+  if (/\brequire\s*\(|createRequire/.test(text)) found.push('require');
+  return found;
+}
+
+const count = (text: string, pattern: RegExp) =>
+  [
+    ...text.matchAll(
+      new RegExp(
+        pattern.source,
+        pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`,
+      ),
+    ),
+  ].length;
+
+const LEDGER_RULES: Record<string, (text: string) => boolean> = {
+  'other Aven packages, the API, runtimes or providers': (t) =>
+    /@aven\/(context-broker|owner-model|api|root|learning|eval|test-utils|runtime|baseline)\b|apps\/api|ModelRuntime|invokeModel|openai|anthropic|gemini|ollama|bedrock|langchain|\bprompt/i.test(
+      t,
+    ),
+  'network, files, processes, environment or timers': (t) =>
+    /\bfetch\b|\bhttps?\.|WebSocket|\bnet\.|\btls\.|readFile|writeFile|\bfs\.|child_process|\bspawn(Sync)?\s*\(|\bexec(File)?(Sync)?\s*\(|worker_threads|process\.env|\bglobalThis\b|\beval\s*\(|new\s+Function\s*\(|\bset(Timeout|Interval|Immediate)\b|queueMicrotask/.test(
+      t,
+    ),
+  'SQL writes, transactions or schema changes': (t) =>
+    /\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PRAGMA|ATTACH|VACUUM)\b|\.(exec|run|transaction|pragma|iterate)\s*\(|\bmigrate\s*\(|openStorage|serializeContract|\.db\b/.test(
+      t,
+    ),
+  'a SQL statement that is not an owner-scoped SELECT': (t) =>
+    [
+      ...t.matchAll(/(['"`])((?:(?!\1)[\s\S])*\bFROM\b(?:(?!\1)[\s\S])*)\1/g),
+    ].some((m) => !/^SELECT .+ FROM \w+ WHERE owner_id = \?/.test(m[2] ?? '')),
+  'more than one Ledger append or Ledger instance': (t) =>
+    count(t, /\bappendEvent\s*\(/) !== 1 ||
+    count(t, /\bcreateLedger\s*\(/) !== 1,
+  'an event type or provenance other than an owner correction': (t) =>
+    /'(owner_request|assistant_response|owner_approval|policy_decision|action_proposed|tool_execution|verification|learning_[a-z_]+|explicit_owner_statement|model_inference|system_generated|external_content|tool_result)'/.test(
+      t,
+    ) ||
+    [...t.matchAll(/eventType:\s*'([a-z_]+)'/g)].some(
+      (m) => m[1] !== 'owner_correction',
+    ) ||
+    [...t.matchAll(/kind:\s*'(explicit_[a-z_]+)'/g)].some(
+      (m) => m[1] !== 'explicit_owner_correction',
+    ),
+  'owner-state writes, learning, promotion or correction interpretation': (t) =>
+    /learned_owner_state|active_task_state|lifecycle_records|learning_candidates|promot|supersed|revok|markTrusted|setLifecycle|negativeRetrieval|salience|suppress|current_instruction|ContextSource|ContextCandidate|resolveImmediate|override|\brank|\bscore\b|inferPreference|detectCorrection|hypothes/i.test(
+      t,
+    ),
+  'authority, approval, Root or tools': (t) =>
+    /\b(ALLOW|DENY|REQUIRE_OWNER_APPROVAL)\b|PolicyDecision|ActionProposal|OwnerApproval|ToolExecution|executeTool|@aven\/root|authori[sz]|\bgrant(ed|s)?\b|approv/i.test(
+      t,
+    ),
+  'a clock or randomness beyond the injectable defaults': (t) =>
+    count(t, /new\s+Date\s*\(\s*\)/) !== 1 ||
+    count(t, /\brandomUUID\s*\(/) !== 1 ||
+    /Date\.now|performance\.now|hrtime|Math\.random|getRandomValues|randomBytes|randomInt|(?<![\w.])(?<!new\s+)Date\s*\(\s*\)/.test(
+      t,
+    ),
+  'hidden reasoning fields': (t) =>
+    /reasoning|chainOfThought|chain_of_thought|\bthoughts?\b|rationale|scratchpad/i.test(
+      t,
+    ),
+};
+
+const BASE = ledgerSource;
+const LEDGER_KNOWN_BAD: Record<string, string[]> = {
+  'other Aven packages, the API, runtimes or providers': [
+    `${BASE}\nimport { createContextBroker } from '@aven/context-broker';`,
+    `${BASE}\nimport { rebuildOwnerModel } from '@aven/owner-model/persistence';`,
+    `${BASE}\nimport { handle } from '../../../../apps/api/src/http.ts';`,
+    `${BASE}\nconst out = await runtime.invokeModel(prompt);`,
+  ],
+  'network, files, processes, environment or timers': [
+    `${BASE}\nawait fetch('https://example.invalid');`,
+    `${BASE}\nconst key = process.env.KEY;`,
+    `${BASE}\nsetTimeout(expire, 1000);`,
+    `${BASE}\nexecFileSync('sqlite3', []);`,
+  ],
+  'SQL writes, transactions or schema changes': [
+    `${BASE}\nstorage.sqlite.prepare('INSERT INTO corrections(record_json) VALUES (?)').run(json);`,
+    `${BASE}\nstorage.sqlite.exec('BEGIN IMMEDIATE');`,
+    `${BASE}\nstorage.sqlite.transaction(() => append())();`,
+    `${BASE}\nmigrate(storage.sqlite);`,
+  ],
+  'a SQL statement that is not an owner-scoped SELECT': [
+    `${BASE}\nconst q = 'SELECT 1 FROM experience_events WHERE record_id = ?';`,
+    `${BASE}\nconst q = 'SELECT owner_id FROM evidence WHERE record_id = ? AND owner_id = ?';`,
+    `${BASE}\nconst q = "SELECT * FROM tasks";`,
+  ],
+  'more than one Ledger append or Ledger instance': [
+    `${BASE}\nledger.appendEvent(second, {});`,
+    `${BASE}\nconst other = createLedger(storage, otherOwner);`,
+    BASE.replace(/appendEvent\s*\(/, 'append('),
+  ],
+  'an event type or provenance other than an owner correction': [
+    `${BASE}\nconst e = { eventType: 'owner_request' };`,
+    `${BASE}\nconst p = { kind: 'explicit_owner_statement' };`,
+    `${BASE}\nconst p = { kind: 'owner_approval' };`,
+    `${BASE}\nconst p = { kind: 'model_inference' };`,
+  ],
+  'owner-state writes, learning, promotion or correction interpretation': [
+    `${BASE}\nconst table = 'learned_owner_state';`,
+    `${BASE}\ncandidate.signals.negativeRetrieval = 1;`,
+    `${BASE}\nexport function resolveImmediateCorrections() {}`,
+    `${BASE}\npromote(candidate);`,
+  ],
+  'authority, approval, Root or tools': [
+    `${BASE}\nif (category === 'permission') return { decision: 'ALLOW' };`,
+    `${BASE}\nconst approval = toOwnerApproval(submission);`,
+    `${BASE}\nexecuteTool(proposal);`,
+    `${BASE}\nconst authorized = true;`,
+  ],
+  'a clock or randomness beyond the injectable defaults': [
+    `${BASE}\nconst recordedAt = new Date().toISOString();`,
+    `${BASE}\nconst t = Date.now();`,
+    `${BASE}\nconst id = randomUUID();`,
+    `${BASE}\nconst j = Math.random();`,
+    `${BASE}\nconst s = Date();`,
+  ],
+  'hidden reasoning fields': [`${BASE}\nreturn { reasoning: steps };`],
+};
+
+describe('AVEN-010 corrections ledger subpath boundaries (patch 3; not runtime security)', () => {
+  it('exports exactly the recorder from the subpath, and nothing more', () => {
+    expect(Object.keys(ledgerApi)).toEqual(['recordOwnerCorrection']);
+    expect(typeof ledgerApi.recordOwnerCorrection).toBe('function');
+  });
+
+  it('keeps the recorder out of the root entry', () => {
+    expect(Object.keys(publicApi)).not.toContain('recordOwnerCorrection');
+    expect(all).not.toMatch(/ledger\//);
+  });
+
+  it('imports only allowlisted names, and the subpath only from itself or the root modules', () => {
+    expect(ledgerImportViolations(ledgerSource)).toEqual([]);
+    for (const bad of [
+      `import { openStorage } from '@aven/storage';`,
+      `import { migrate } from '@aven/storage';`,
+      `import { serializeContract } from '@aven/storage';`,
+      `import * as ledger from '@aven/ledger';`,
+      `import { createContextBroker } from '@aven/context-broker';`,
+      `import { OwnerApprovalSchema } from '@aven/contracts';`,
+      `import { PolicyDecisionSchema } from '@aven/contracts';`,
+      `import { randomBytes } from 'node:crypto';`,
+      `import { readFileSync } from 'node:fs';`,
+      `import { request } from 'node:https';`,
+      `import { x } from '../../../ledger/src/records.ts';`,
+      `const m = await import('node:child_process');`,
+    ])
+      expect(ledgerImportViolations(bad), bad).not.toEqual([]);
+  });
+
+  for (const [rule, violates] of Object.entries(LEDGER_RULES))
+    it(`has no ${rule}`, () => {
+      expect(violates(ledgerSource), rule).toBe(false);
+      for (const bad of LEDGER_KNOWN_BAD[rule]!)
+        expect(violates(bad), bad.slice(BASE.length)).toBe(true);
+    });
+
+  it('pins the owner-scoped precheck statements exactly', () => {
+    const statements = [
+      ...ledgerSource.matchAll(
+        /(['"`])((?:(?!\1)[\s\S])*\bFROM\b(?:(?!\1)[\s\S])*)\1/g,
+      ),
+    ].map((m) => m[2]);
+    expect(statements).toEqual([
+      'SELECT 1 AS found FROM owners WHERE owner_id = ?',
+      'SELECT session_id FROM tasks WHERE owner_id = ? AND task_id = ?',
+      'SELECT 1 AS found FROM experience_events WHERE owner_id = ? AND record_id = ?',
+      'SELECT 1 AS found FROM evidence WHERE owner_id = ? AND record_id = ?',
+      'SELECT 1 AS found FROM evidence WHERE owner_id = ? AND record_id = ? AND event_id = ?',
+      "SELECT 1 AS found FROM record_versions WHERE owner_id = ? AND record_kind = 'owner_state' AND record_id = ? AND record_version = ?",
+    ]);
   });
 });

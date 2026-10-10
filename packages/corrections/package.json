@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-010 correction events and immediate session overrides (scaffold): package identity and fixed errors only; no recorder, resolver, Ledger reader, context source, learning, storage or authority",
+  "description": "AVEN-010 correction events and immediate session overrides: package identity and fixed errors (root); ./ledger records one explicit owner correction through one frozen Ledger append. No resolver, context source, owner-state writer, learning or authority",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ledger": "./src/ledger/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
@@ -13,6 +14,8 @@
   },
   "dependencies": {
     "@aven/contracts": "workspace:*",
+    "@aven/ledger": "workspace:*",
+    "@aven/storage": "workspace:*",
     "zod": "4.6.5"
   },
   "devDependencies": {
