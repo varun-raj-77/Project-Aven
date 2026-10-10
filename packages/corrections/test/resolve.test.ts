@@ -1437,3 +1437,224 @@ describe('resolveImmediateCorrections over history recorded by the patch 3 recor
     ).toEqual([first.eventId]);
   });
 });
+
+describe('resolveImmediateCorrections: own evidence must be the recorded instruction (review correction)', () => {
+  type Raw = { sequence: number; event: Json; evidence: Json[] };
+  const own = (e: Raw) => e.evidence[0]!;
+  const withOwn = (
+    change: (record: Json, e: Raw) => void,
+    spec: Partial<Spec> = {},
+  ) => {
+    const e = entry({ seq: 1, name: 'a', ...spec }) as unknown as Raw;
+    change(own(e), e);
+    return history(e as unknown as Json);
+  };
+  const DIGEST = { algorithm: 'sha256', value: 'a'.repeat(64) };
+
+  it('accepts own evidence whose recorded text equals the instruction exactly and was recorded with its event', () => {
+    const instruction = '  Synthetic:\tkeep it short — «précis».\r\n';
+    const h = withOwn(() => undefined, { instruction });
+    const e = h.entries[0] as unknown as Raw;
+    expect(own(e)['content']).toEqual({
+      kind: 'recorded_text',
+      text: instruction,
+    });
+    expect(own(e)['recordedAt']).toBe(e.event['recordedAt']);
+    expect(resolve(h).active[0]!.correctedInstruction).toBe(instruction);
+  });
+
+  it('rejects own evidence with the same identity and provenance but a different recorded text', () => {
+    invalidHistory(() =>
+      resolve(
+        withOwn((record) => {
+          record['content'] = {
+            kind: 'recorded_text',
+            text: 'Synthetic: a different instruction',
+          };
+        }),
+      ),
+    );
+  });
+
+  it('rejects own evidence that holds an artifact instead of recorded text', () => {
+    invalidHistory(() =>
+      resolve(
+        withOwn((record) => {
+          record['content'] = {
+            kind: 'artifact',
+            artifact: { locator: 'synthetic:artifact', digest: DIGEST },
+          };
+        }),
+      ),
+    );
+  });
+
+  it.each<[string, string, string]>([
+    ['a trailing space', 'Synthetic: be brief', 'Synthetic: be brief '],
+    ['a leading space', 'Synthetic: be brief', ' Synthetic: be brief'],
+    [
+      'CRLF instead of LF',
+      'Synthetic: line one\nline two',
+      'Synthetic: line one\r\nline two',
+    ],
+    ['a tab instead of a space', 'Synthetic: be brief', 'Synthetic:\tbe brief'],
+    ['a no-break space', 'Synthetic: be brief', 'Synthetic: be brief'],
+    ['a zero-width space', 'Synthetic: be brief', 'Synthetic: be​ brief'],
+    ['NFD instead of NFC', 'Synthetic: café', 'Synthetic: café'],
+    ['a case change', 'Synthetic: be brief', 'Synthetic: Be brief'],
+  ])(
+    'rejects recorded text differing only by %s (exact equality, no normalization)',
+    (_label, instruction, recorded) => {
+      expect(recorded).not.toBe(instruction);
+      invalidHistory(() =>
+        resolve(
+          withOwn(
+            (record) => {
+              record['content'] = { kind: 'recorded_text', text: recorded };
+            },
+            { instruction },
+          ),
+        ),
+      );
+    },
+  );
+
+  it.each<[string, string]>([
+    ['a later instant', '2026-10-01T00:00:01.001Z'],
+    ['an earlier instant', '2026-10-01T00:00:00.999Z'],
+    ['the same instant written with an offset', '2026-10-01T00:00:01+00:00'],
+    ['the same instant with an extra fraction', '2026-10-01T00:00:01.000Z'],
+  ])(
+    'rejects own evidence recorded at %s (exact match with the event)',
+    (_label, recordedAt) => {
+      // The event of seq 1 is recorded at 2026-10-01T00:00:01Z; the frozen
+      // Ledger stamps the event and its evidence with one recording time.
+      expect(recordedAt).not.toBe(at(1));
+      invalidHistory(() =>
+        resolve(
+          withOwn((record) => {
+            record['recordedAt'] = recordedAt;
+          }),
+        ),
+      );
+    },
+  );
+
+  it('keeps supporting additional evidence records whose content and time differ, without changing the view', () => {
+    const plain = history(
+      entry({ seq: 1, name: 'a' }),
+      entry({ seq: 2, name: 'b', target: correctsEvent('a') }),
+    );
+    const extra = (spec: Spec, content: Json, recordedAt: string) => {
+      const e = entry({
+        ...spec,
+        extraEvidence: [`evidence_${spec.name}_extra`],
+      }) as unknown as Raw;
+      e.evidence[1] = { ...e.evidence[1]!, content, recordedAt };
+      return e as unknown as Json;
+    };
+    const withExtras = history(
+      extra(
+        { seq: 1, name: 'a' },
+        {
+          kind: 'artifact',
+          artifact: { locator: 'synthetic:attachment', digest: DIGEST },
+        },
+        at(1),
+      ),
+      extra(
+        { seq: 2, name: 'b', target: correctsEvent('a') },
+        { kind: 'recorded_text', text: 'Synthetic: unrelated supporting note' },
+        at(3),
+      ),
+    );
+    expect(resolve(withExtras)).toEqual(resolve(plain));
+    expect(activeIds(resolve(withExtras))).toEqual(['event_b']);
+  });
+
+  it('leaves ordering, scope, supersession and permission behavior unchanged for consistent histories', () => {
+    const h = history(
+      entry({
+        seq: 3,
+        name: 'p',
+        category: 'permission',
+        target: correctsEvent('a'),
+      }),
+      entry({ seq: 1, name: 'a', kind: 'current_session' }),
+      entry({
+        seq: 2,
+        name: 'b',
+        kind: 'current_task',
+        target: correctsEvidence('a'),
+      }),
+      entry({ seq: 4, name: 'c', kind: 'unspecified' }),
+    );
+    const here = resolve(h);
+    expect(activeIds(here)).toEqual(['event_b', 'event_c']);
+    expect(inactive(here)).toEqual([
+      ['event_a', 'superseded_by_correction', ['event_b']],
+      ['event_p', 'deferred_to_root', []],
+    ]);
+    const sibling = resolve(h, query(T2));
+    expect(activeIds(sibling)).toEqual(['event_a']);
+    // The permission correction is task-scoped to T, so it is not in T2's view.
+    expect(inactive(sibling)).toEqual([]);
+    expect(resolve(h, query(T3, S2)).active).toEqual([]);
+  });
+
+  it('accepts history recorded by the patch 3 recorder, whose own evidence always holds the exact instruction', () => {
+    const storage = world();
+    const texts = [
+      '  Synthetic: keep it short.\n',
+      'Synthetic: café — «précis»\r\n\ttwo lines',
+      'Synthetic: plain',
+    ];
+    texts.forEach((correctedInstruction, i) =>
+      recordOwnerCorrection(
+        storage,
+        submission({
+          correctedInstruction,
+          category: i === 2 ? 'permission' : 'communication',
+        }),
+        recorderOptions({}, i + 1),
+      ),
+    );
+    const entries = [
+      ...createLedger(
+        storage,
+        c.OwnerIdSchema.parse(RECORDED_OWNER),
+      ).replayEvents({ eventType: 'owner_correction' }),
+    ].map((stored) => ({
+      sequence: stored.sequence,
+      event: stored.event,
+      evidence: stored.evidence,
+    }));
+    for (const stored of entries) {
+      const ownRecord = stored.evidence.find(
+        (record) =>
+          record.id ===
+          (stored.event.payload as { evidence: { evidenceId: string } })
+            .evidence.evidenceId,
+      )!;
+      expect(ownRecord.content).toEqual({
+        kind: 'recorded_text',
+        text: (stored.event.payload as { correctedInstruction: string })
+          .correctedInstruction,
+      });
+      expect(ownRecord.recordedAt).toBe(stored.event.recordedAt);
+    }
+    const view = resolveImmediateCorrections(
+      { ownerId: RECORDED_OWNER, entries },
+      {
+        ownerId: RECORDED_OWNER,
+        sessionId: 'session_synthetic',
+        taskId: 'task_synthetic',
+      },
+      asOf(),
+    );
+    expect(view.active.map((a) => a.correctedInstruction)).toEqual(
+      texts.slice(0, 2),
+    );
+    expect(inactive(view)).toEqual([['event_corr_3', 'deferred_to_root', []]]);
+  });
+});

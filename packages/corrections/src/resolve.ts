@@ -50,6 +50,9 @@ import { inertCopy, type InertLimits } from './inert.ts';
  *     unresolved overlap. Text is never interpreted.
  *   - SUPPRESSION targets come only from ACTIVE corrections' structured
  *     targets; `unidentified` targets have none.
+ *   - EVIDENCE: each correction's own evidence must be `recorded_text` whose
+ *     text equals its `correctedInstruction` exactly and whose `recordedAt`
+ *     equals the event's (one Ledger append records both).
  */
 export const IMMEDIATE_RESOLUTION_VERSION = 'aven-010-immediate-resolution-v1';
 
@@ -266,9 +269,16 @@ function validate(history: z.output<typeof HistorySchema>): Entry[] {
     const own = entry.evidence.find(
       (record) => record.id === event.payload.evidence.evidenceId,
     );
+    // The correction's own evidence is the recorded instruction itself: the
+    // same text, exactly (no trimming or normalization), as recorded text,
+    // recorded in the same Ledger append as its event. Additional evidence
+    // records keep their own content.
     if (
       own === undefined ||
-      own.provenance.kind !== 'explicit_owner_correction'
+      own.provenance.kind !== 'explicit_owner_correction' ||
+      own.content.kind !== 'recorded_text' ||
+      own.content.text !== event.payload.correctedInstruction ||
+      own.recordedAt !== event.recordedAt
     )
       return invalid();
     entries.push({ sequence: entry.sequence, event });
