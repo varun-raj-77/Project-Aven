@@ -284,25 +284,34 @@ function validate(history: z.output<typeof HistorySchema>): Entry[] {
     entries.push({ sequence: entry.sequence, event });
   }
   entries.sort((a, b) => a.sequence - b.sequence);
-  // A correction can only reference corrections recorded before it.
+  // Identity indexes over the supplied correction history: every correction
+  // event, every evidence record those events own (own and additional), and
+  // exact event-to-evidence membership. The input holds corrections only, so
+  // a reference that resolves to neither a known correction event nor known
+  // correction evidence is external (ordinary Ledger history) and allowed.
   const byEvent = new Map(entries.map((e) => [e.event.id, e]));
-  const byEvidence = new Map(
-    entries.map((e) => [e.event.payload.evidence.evidenceId, e]),
-  );
+  const evidenceOwner = new Map<string, Entry>();
+  for (const e of entries)
+    for (const evidenceId of e.event.evidenceIds)
+      evidenceOwner.set(evidenceId, e);
   for (const entry of entries) {
     const target = entry.event.payload.target;
-    const earlier = (other: Entry | undefined) =>
-      other === undefined || other.sequence < entry.sequence;
-    if (target.kind === 'event' && !earlier(byEvent.get(target.eventId)))
-      return invalid();
+    // A correction can only reference corrections recorded before it.
+    const earlier = (other: Entry) => other.sequence < entry.sequence;
+    if (target.kind === 'event') {
+      const known = byEvent.get(target.eventId);
+      if (known !== undefined && !earlier(known)) return invalid();
+    }
     if (target.kind === 'evidence') {
-      const owner = byEvidence.get(target.reference.evidenceId);
-      if (
-        !earlier(owner) ||
-        !earlier(byEvent.get(target.reference.eventId)) ||
-        (owner !== undefined && owner.event.id !== target.reference.eventId)
-      )
-        return invalid();
+      const { evidenceId, eventId } = target.reference;
+      // Evidence IDs are unique across the supplied corrections, so one
+      // comparison checks both directions: known correction evidence must
+      // name the event that owns it, and a known correction event must own
+      // the named evidence. Neither known means external (allowed).
+      const holder = evidenceOwner.get(evidenceId);
+      const known = byEvent.get(eventId);
+      if (holder !== known) return invalid();
+      if (known !== undefined && !earlier(known)) return invalid();
     }
   }
   return entries;

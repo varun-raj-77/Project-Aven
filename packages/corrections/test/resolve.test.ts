@@ -1658,3 +1658,443 @@ describe('resolveImmediateCorrections: own evidence must be the recorded instruc
     expect(inactive(view)).toEqual([['event_corr_3', 'deferred_to_root', []]]);
   });
 });
+
+describe('resolveImmediateCorrections: correction target evidence consistency (Codex F1)', () => {
+  const extra = (name: string) => `evidence_${name}_extra`;
+  const evidenceTarget = (evidence: string, event: string) => ({
+    kind: 'evidence',
+    reference: { evidenceId: evidence, eventId: event },
+  });
+  const withExtra = (spec: Spec) =>
+    entry({ ...spec, extraEvidence: [extra(spec.name)] });
+
+  it('accepts a correctly paired reference to additional evidence, which is an ordinary target and supersedes nothing', () => {
+    const h = history(
+      withExtra({ seq: 1, name: 'a' }),
+      entry({
+        seq: 2,
+        name: 'b',
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+    );
+    const view = resolve(h);
+    expect(activeIds(view)).toEqual(['event_a', 'event_b']);
+    expect(view.inactive).toEqual([]);
+    expect(view.supersessions).toEqual([]);
+    expect(view.suppressionTargets).toContainEqual({
+      target: evidenceTarget(extra('a'), 'event_a'),
+      byEventIds: ['event_b'],
+    });
+  });
+
+  it.each<[string, () => unknown]>([
+    [
+      'additional evidence ID with the wrong event',
+      () =>
+        history(
+          withExtra({ seq: 1, name: 'a' }),
+          entry({
+            seq: 2,
+            name: 'b',
+            target: evidenceTarget(extra('a'), ORDINARY_EVENT),
+          }),
+        ),
+    ],
+    [
+      'additional evidence ID with an unknown event',
+      () =>
+        history(
+          withExtra({ seq: 1, name: 'a' }),
+          entry({
+            seq: 2,
+            name: 'b',
+            target: evidenceTarget(extra('a'), 'event_unknown'),
+          }),
+        ),
+    ],
+    [
+      'additional evidence ID paired with another correction event',
+      () =>
+        history(
+          withExtra({ seq: 1, name: 'a' }),
+          entry({ seq: 2, name: 'c' }),
+          entry({
+            seq: 3,
+            name: 'b',
+            target: evidenceTarget(extra('a'), 'event_c'),
+          }),
+        ),
+    ],
+    [
+      'own evidence ID with an unknown event',
+      () =>
+        history(
+          entry({ seq: 1, name: 'a' }),
+          entry({
+            seq: 2,
+            name: 'b',
+            target: evidenceTarget('evidence_a', 'event_unknown'),
+          }),
+        ),
+    ],
+    [
+      'a known correction event with an absent evidence ID',
+      () =>
+        history(
+          entry({ seq: 1, name: 'a' }),
+          entry({
+            seq: 2,
+            name: 'b',
+            target: evidenceTarget('evidence_absent', 'event_a'),
+          }),
+        ),
+    ],
+    [
+      'a known correction event with another correction’s evidence',
+      () =>
+        history(
+          entry({ seq: 1, name: 'a' }),
+          withExtra({ seq: 2, name: 'c' }),
+          entry({
+            seq: 3,
+            name: 'b',
+            target: evidenceTarget(extra('c'), 'event_a'),
+          }),
+        ),
+    ],
+    [
+      'a forward reference to additional evidence (correct pairing)',
+      () =>
+        history(
+          entry({
+            seq: 1,
+            name: 'a',
+            target: evidenceTarget(extra('b'), 'event_b'),
+          }),
+          withExtra({ seq: 2, name: 'b' }),
+        ),
+    ],
+    [
+      'a forward reference to additional evidence (wrong event)',
+      () =>
+        history(
+          entry({
+            seq: 1,
+            name: 'a',
+            target: evidenceTarget(extra('b'), ORDINARY_EVENT),
+          }),
+          withExtra({ seq: 2, name: 'b' }),
+        ),
+    ],
+    [
+      'a self-reference to own additional evidence (correct pairing)',
+      () =>
+        history(
+          withExtra({
+            seq: 1,
+            name: 'a',
+            target: evidenceTarget(extra('a'), 'event_a'),
+          }),
+        ),
+    ],
+    [
+      'a self-reference to own additional evidence (wrong event)',
+      () =>
+        history(
+          withExtra({
+            seq: 1,
+            name: 'a',
+            target: evidenceTarget(extra('a'), ORDINARY_EVENT),
+          }),
+        ),
+    ],
+    [
+      'a self-reference to own instruction evidence',
+      () =>
+        history(entry({ seq: 1, name: 'a', target: correctsEvidence('a') })),
+    ],
+  ])('rejects %s with the fixed error and no leak', (_label, make) => {
+    let caught: unknown;
+    try {
+      resolve(make());
+    } catch (error) {
+      caught = error;
+    }
+    invalidHistory(() => resolve(make()));
+    const text = JSON.stringify(caught);
+    for (const leaked of [
+      'evidence_',
+      'event_',
+      'owner_',
+      'session_',
+      'task_',
+      'Synthetic',
+    ])
+      expect(text).not.toContain(leaked);
+  });
+
+  it.each<
+    [
+      string,
+      (own: Json, added: Json, instruction: string, recordedAt: string) => void,
+    ]
+  >([
+    [
+      'own text differs while additional evidence holds the instruction',
+      (own, added, instruction) => {
+        own['content'] = {
+          kind: 'recorded_text',
+          text: 'Synthetic: something else',
+        };
+        added['content'] = { kind: 'recorded_text', text: instruction };
+      },
+    ],
+    [
+      'own evidence is an artifact while additional evidence holds the instruction',
+      (own, added, instruction) => {
+        own['content'] = {
+          kind: 'artifact',
+          artifact: {
+            locator: 'synthetic:artifact',
+            digest: { algorithm: 'sha256', value: 'b'.repeat(64) },
+          },
+        };
+        added['content'] = { kind: 'recorded_text', text: instruction };
+      },
+    ],
+    [
+      'own evidence recorded at another time while additional evidence matches it',
+      (own, added, _instruction, recordedAt) => {
+        own['recordedAt'] = '2026-10-01T00:00:01.001Z';
+        added['recordedAt'] = recordedAt;
+      },
+    ],
+  ])(
+    'never lets additional evidence stand in for the own evidence: %s',
+    (_label, change) => {
+      const e = withExtra({ seq: 1, name: 'a' }) as unknown as {
+        event: Json;
+        evidence: Json[];
+      };
+      const payload = e.event['payload'] as { correctedInstruction: string };
+      change(
+        e.evidence[0]!,
+        e.evidence[1]!,
+        payload.correctedInstruction,
+        e.event['recordedAt'] as string,
+      );
+      invalidHistory(() => resolve(history(e as unknown as Json)));
+    },
+  );
+
+  it('keeps accepting genuinely external, non-correction evidence and events', () => {
+    const h = history(
+      entry({
+        seq: 1,
+        name: 'a',
+        target: evidenceTarget('evidence_external', 'event_external'),
+      }),
+      entry({
+        seq: 2,
+        name: 'b',
+        target: evidenceTarget('evidence_source', 'event_source'),
+      }),
+      entry({
+        seq: 3,
+        name: 'c',
+        target: { kind: 'event', eventId: 'event_external' },
+      }),
+    );
+    const view = resolve(h);
+    expect(activeIds(view)).toEqual(['event_a', 'event_b', 'event_c']);
+    expect(view.suppressionTargets.map((s) => s.target)).toEqual([
+      evidenceTarget('evidence_external', 'event_external'),
+      evidenceTarget('evidence_source', 'event_source'),
+      { kind: 'event', eventId: 'event_external' },
+    ]);
+  });
+
+  it('keeps event-target and own-evidence supersession unchanged, and never resurrects', () => {
+    const h = history(
+      withExtra({ seq: 1, name: 'a' }),
+      entry({ seq: 2, name: 'b', target: correctsEvent('a') }),
+      entry({
+        seq: 3,
+        name: 'c',
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+      entry({ seq: 4, name: 'd', target: correctsEvidence('b') }),
+    );
+    const view = resolve(h);
+    expect(activeIds(view)).toEqual(['event_c', 'event_d']);
+    expect(inactive(view)).toEqual([
+      ['event_a', 'superseded_by_correction', ['event_b']],
+      ['event_b', 'superseded_by_correction', ['event_d']],
+    ]);
+  });
+
+  it('keeps permission corrections deferred when they target or are targeted through additional evidence', () => {
+    const h = history(
+      withExtra({ seq: 1, name: 'a' }),
+      withExtra({
+        seq: 2,
+        name: 'p',
+        category: 'permission',
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+      entry({
+        seq: 3,
+        name: 'b',
+        target: evidenceTarget(extra('p'), 'event_p'),
+      }),
+    );
+    const view = resolve(h);
+    expect(activeIds(view)).toEqual(['event_a', 'event_b']);
+    expect(inactive(view)).toEqual([['event_p', 'deferred_to_root', []]]);
+    expect(view.supersessions).toEqual([]);
+    // Only active corrections contribute targets; the permission one adds none.
+    expect(view.suppressionTargets.map((s) => s.byEventIds)).toEqual([
+      ['event_a'],
+      ['event_b'],
+    ]);
+  });
+
+  it('keeps task and session isolation unchanged for additional-evidence targets', () => {
+    const h = history(
+      withExtra({ seq: 1, name: 'a', kind: 'current_session' }),
+      entry({
+        seq: 2,
+        name: 'b',
+        task: T2,
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+    );
+    expect(activeIds(resolve(h, query(T)))).toEqual(['event_a']);
+    expect(
+      resolve(h, query(T)).suppressionTargets.map((s) => s.byEventIds),
+    ).toEqual([['event_a']]);
+    const sibling = resolve(h, query(T2));
+    expect(activeIds(sibling)).toEqual(['event_a', 'event_b']);
+    expect(sibling.supersessions).toEqual([]);
+    expect(resolve(h, query(T3, S2)).active).toEqual([]);
+  });
+
+  it('is deterministic for every permutation of a history with additional-evidence references', () => {
+    const entries = [
+      withExtra({ seq: 1, name: 'a', kind: 'current_session' }),
+      entry({
+        seq: 2,
+        name: 'b',
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+      entry({ seq: 3, name: 'c', target: correctsEvidence('a') }),
+      entry({
+        seq: 4,
+        name: 'd',
+        target: evidenceTarget('evidence_external', 'event_external'),
+      }),
+    ];
+    const permute = (list: Json[]): Json[][] =>
+      list.length <= 1
+        ? [list]
+        : list.flatMap((x, i) =>
+            permute([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [
+              x,
+              ...rest,
+            ]),
+          );
+    const reference = JSON.stringify(resolve(history(...entries)));
+    const orders = permute(entries);
+    expect(orders).toHaveLength(24);
+    for (const order of orders)
+      expect(JSON.stringify(resolve(history(...order)))).toBe(reference);
+  });
+
+  it('keeps as-of replay unchanged and validates the whole supplied history before the boundary', () => {
+    const valid = history(
+      withExtra({ seq: 1, name: 'a' }),
+      entry({ seq: 2, name: 'b', target: correctsEvent('a') }),
+      entry({
+        seq: 3,
+        name: 'c',
+        target: evidenceTarget(extra('a'), 'event_a'),
+      }),
+    );
+    expect(activeIds(resolve(valid, query(), asOf(FAR_FUTURE, 1)))).toEqual([
+      'event_a',
+    ]);
+    expect(activeIds(resolve(valid, query(), asOf(FAR_FUTURE, 2)))).toEqual([
+      'event_b',
+    ]);
+    expect(activeIds(resolve(valid, query(), asOf(FAR_FUTURE, 3)))).toEqual([
+      'event_b',
+      'event_c',
+    ]);
+    expect(activeIds(resolve(valid, query(), asOf(at(2))))).toEqual([
+      'event_b',
+    ]);
+    // Inconsistency anywhere in the supplied history fails closed, even when
+    // the as-of boundary would exclude the inconsistent entry.
+    const inconsistent = history(
+      withExtra({ seq: 1, name: 'a' }),
+      entry({
+        seq: 2,
+        name: 'b',
+        target: evidenceTarget(extra('a'), ORDINARY_EVENT),
+      }),
+    );
+    invalidHistory(() => resolve(inconsistent, query(), asOf(FAR_FUTURE, 1)));
+  });
+
+  it('accepts recorder-produced Ledger history that targets an earlier correction’s own evidence', () => {
+    const storage = world();
+    const first = recordOwnerCorrection(
+      storage,
+      submission(),
+      recorderOptions({}, 1),
+    );
+    const second = recordOwnerCorrection(
+      storage,
+      submission({
+        target: {
+          kind: 'evidence',
+          reference: { evidenceId: first.evidenceId, eventId: first.eventId },
+        },
+      }),
+      recorderOptions({}, 2),
+    );
+    const third = recordOwnerCorrection(
+      storage,
+      submission({
+        target: {
+          kind: 'evidence',
+          reference: { evidenceId: 'evidence_source', eventId: 'event_source' },
+        },
+      }),
+      recorderOptions({}, 3),
+    );
+    const entries = [
+      ...createLedger(
+        storage,
+        c.OwnerIdSchema.parse(RECORDED_OWNER),
+      ).replayEvents({ eventType: 'owner_correction' }),
+    ].map((stored) => ({
+      sequence: stored.sequence,
+      event: stored.event,
+      evidence: stored.evidence,
+    }));
+    const view = resolveImmediateCorrections(
+      { ownerId: RECORDED_OWNER, entries },
+      {
+        ownerId: RECORDED_OWNER,
+        sessionId: 'session_synthetic',
+        taskId: 'task_synthetic',
+      },
+      asOf(),
+    );
+    expect(activeIds(view)).toEqual([second.eventId, third.eventId]);
+    expect(inactive(view)).toEqual([
+      [first.eventId, 'superseded_by_correction', [second.eventId]],
+    ]);
+  });
+});
