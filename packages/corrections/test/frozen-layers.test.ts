@@ -1,6 +1,20 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { devNull, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
 
 /**
  * AVEN-010 frozen-layer REGRESSION TRIPWIRE (tooling discipline, not security).
@@ -24,6 +38,15 @@ import { describe, expect, it } from 'vitest';
  * explicitly authorized to touch a pinned file updates this table in the same
  * reviewed change. Files are compared byte-for-byte (the repository checks
  * text out with LF line endings; `docs/sources/` keeps its original bytes).
+ *
+ * Codex audit remediation R4 (finding F4) adds a REPOSITORY-WIDE inventory
+ * (end of this file): every path in the Git index (`git ls-files --stage
+ * -z`) and every untracked, non-ignored path (`git ls-files --others
+ * --exclude-standard -z`) must be pinned, in the authorized update set, or an
+ * authorized addition, and every tracked entry must be a regular, non-
+ * executable file (index mode 100644, as every file at aven-009 was). It is
+ * test-time regression tooling, not authentication, a sandbox or filesystem
+ * security.
  */
 const repoRoot = new URL('../../../', import.meta.url);
 const FROZEN_AT_AVEN_009: Record<string, string> = {
@@ -563,8 +586,18 @@ const gateDrift = (
         createHash('sha256').update(read(file)).digest('hex') !== digest,
     )
     .map(([file]) => file);
+/**
+ * Reads a repository file's own bytes. R4: a symbolic link (or anything but
+ * a regular file) is refused rather than followed, so a pinned file can never
+ * be satisfied through a link to identical bytes elsewhere.
+ */
+const readRegular = (location: URL | string): Buffer => {
+  if (!lstatSync(location).isFile())
+    throw new Error('not a regular file: refusing to follow');
+  return readFileSync(location);
+};
 const readRepoFile = (file: string): Buffer =>
-  readFileSync(new URL(file, repoRoot));
+  readRegular(new URL(file, repoRoot));
 
 /**
  * SHA-256 of the serialized 226-entry AVEN-009 table above (its exact
@@ -575,9 +608,7 @@ const FROZEN_TABLE_DIGEST =
   '3ef554a25e15e9ded2daed7d6fee84d65386e6221aa0fd51492e67467af8eb5d';
 
 const sha256 = (relativePath: string): string =>
-  createHash('sha256')
-    .update(readFileSync(new URL(relativePath, repoRoot)))
-    .digest('hex');
+  createHash('sha256').update(readRepoFile(relativePath)).digest('hex');
 
 const children = (dir: string) =>
   readdirSync(new URL(`${dir}/`, repoRoot), { withFileTypes: true }).filter(
@@ -591,10 +622,16 @@ const walk = (dir: string): string[] =>
     return entry.isDirectory() ? walk(path) : [path];
   });
 
-const authorizedNew = (path: string): boolean =>
-  AUTHORIZED_NEW_PATHS.some((allowed) =>
+/** Segment-safe: a prefix entry ends with `/`, anything else is exact. */
+const matchesAuthorized = (
+  authorized: readonly string[],
+  path: string,
+): boolean =>
+  authorized.some((allowed) =>
     allowed.endsWith('/') ? path.startsWith(allowed) : path === allowed,
   );
+const authorizedNew = (path: string): boolean =>
+  matchesAuthorized(AUTHORIZED_NEW_PATHS, path);
 
 /** Files that are neither pinned, authorized updates nor authorized additions. */
 const unauthorizedAdditions = (paths: readonly string[]): string[] =>
@@ -861,4 +898,991 @@ describe('AVEN-010 frozen layers (tooling tripwire, not runtime security)', () =
     ])
       expect(FROZEN_AT_AVEN_009, file).toHaveProperty([file]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Codex audit remediation R4 (finding F4): repository-wide addition guard.
+//
+// The directory walks above cover selected trees only; a new root file or a
+// new hidden root directory (`.github/...`) escaped them. This inventory asks
+// Git for EVERY path instead:
+//   - tracked: `git ls-files --stage -z` (the index, so committed AND staged
+//     paths, including force-added ignored files, with their modes);
+//   - untracked: `git ls-files --others --exclude-standard -z`, i.e. exactly
+//     what `git add -A` would stage. Committed `.gitignore` rules (and the
+//     repository-local `.git/info/exclude`) hide ignored local artifacts such
+//     as `node_modules/`; the user's global excludes file is disabled so it
+//     cannot hide anything. An ignored file can only enter history by being
+//     force-added, and is then checked as tracked.
+// Paths are NUL-delimited and never split on spaces or newlines. `.git`
+// (directory or linked-worktree pointer file) is never listed by Git. Links
+// are never followed: types come from index modes and `lstat`. Inherited GIT_*
+// variables are dropped and discovery cannot climb above the inspected
+// directory, which must itself be the work-tree root. Any Git failure fails
+// closed. Filesystem executable bits are NOT inspected (they differ across
+// operating systems); executable mode is judged from the index only.
+// ---------------------------------------------------------------------------
+
+const REGULAR_MODE = '100644';
+
+/** Fixed finding reasons, in reporting order (per path). */
+const REASONS = [
+  'unauthorized_addition',
+  'missing_from_index',
+  'missing_from_worktree',
+  'unmerged_entry',
+  'symbolic_link',
+  'gitlink',
+  'nested_repository',
+  'executable_mode',
+  'unexpected_mode',
+  'worktree_type_mismatch',
+] as const;
+type Reason = (typeof REASONS)[number];
+type WorktreeType = 'file' | 'symlink' | 'directory' | 'other' | 'missing';
+
+interface PathPolicy {
+  /** Tracked at the frozen baseline; must stay tracked regular files. */
+  readonly frozen: ReadonlySet<string>;
+  /** Authorized updates of baseline files; must stay tracked regular files. */
+  readonly updates: readonly string[];
+  /** Authorized additions: prefixes ending in `/`, otherwise exact paths. */
+  readonly additions: readonly string[];
+}
+interface TrackedEntry {
+  readonly path: string;
+  readonly mode: string;
+  readonly stage: string;
+  readonly worktree: WorktreeType;
+}
+interface UntrackedEntry {
+  readonly path: string;
+  readonly worktree: WorktreeType;
+}
+interface Inventory {
+  readonly tracked: readonly TrackedEntry[];
+  readonly untracked: readonly UntrackedEntry[];
+}
+interface Finding {
+  readonly reason: Reason;
+  readonly path: string;
+}
+
+const REAL_POLICY: PathPolicy = {
+  frozen: new Set(Object.keys(FROZEN_AT_AVEN_009)),
+  updates: AUTHORIZED_UPDATES,
+  additions: AUTHORIZED_NEW_PATHS,
+};
+
+/** Fixed failure for any unusable repository; it never carries Git output. */
+class InventoryUnavailable extends Error {
+  constructor() {
+    super('repository inventory unavailable: failing closed');
+  }
+}
+
+/** Git for inspection only: no inherited GIT_*, no discovery above `dir`. */
+function inspectGit(dir: string) {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env))
+    if (!key.toUpperCase().startsWith('GIT_')) env[key] = value;
+  env['GIT_CEILING_DIRECTORIES'] = dirname(dir);
+  env['GIT_TERMINAL_PROMPT'] = '0';
+  env['GIT_OPTIONAL_LOCKS'] = '0';
+  return (args: readonly string[]): string => {
+    try {
+      return execFileSync(
+        'git',
+        ['-c', `core.excludesFile=${devNull}`, '-C', dir, ...args],
+        {
+          encoding: 'utf8',
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          maxBuffer: 64 * 1024 * 1024,
+        },
+      );
+    } catch {
+      throw new InventoryUnavailable();
+    }
+  };
+}
+
+const nulRecords = (output: string): string[] => {
+  if (output === '') return [];
+  // -z output ends every record with NUL; anything else is malformed.
+  if (!output.endsWith('\0')) throw new InventoryUnavailable();
+  return output.slice(0, -1).split('\0');
+};
+
+/** The type of the path itself (never following a link). */
+function worktreeType(dir: string, path: string): WorktreeType {
+  try {
+    const stat = lstatSync(join(dir, path));
+    return stat.isSymbolicLink()
+      ? 'symlink'
+      : stat.isFile()
+        ? 'file'
+        : stat.isDirectory()
+          ? 'directory'
+          : 'other';
+  } catch {
+    return 'missing';
+  }
+}
+
+/** Every index entry and every untracked, non-ignored path of `dir`. */
+function repositoryInventory(dir: string): Inventory {
+  const git = inspectGit(dir);
+  let root: string;
+  try {
+    root = realpathSync(dir);
+  } catch {
+    throw new InventoryUnavailable();
+  }
+  if (git(['rev-parse', '--is-inside-work-tree']).trim() !== 'true')
+    throw new InventoryUnavailable();
+  const top = git(['rev-parse', '--show-toplevel']).replace(/\r?\n$/, '');
+  let realTop: string;
+  try {
+    realTop = realpathSync(top);
+  } catch {
+    throw new InventoryUnavailable();
+  }
+  if (realTop !== root) throw new InventoryUnavailable();
+  const tracked = nulRecords(git(['ls-files', '--stage', '-z'])).map(
+    (record) => {
+      const match = /^([0-7]{6}) ([0-9a-f]{40,64}) ([0-3])\t([\s\S]+)$/.exec(
+        record,
+      );
+      if (!match) throw new InventoryUnavailable();
+      const path = match[4]!;
+      return {
+        path,
+        mode: match[1]!,
+        stage: match[3]!,
+        worktree: worktreeType(root, path),
+      };
+    },
+  );
+  const untracked = nulRecords(
+    git(['ls-files', '--others', '--exclude-standard', '-z']),
+  ).map((path) => ({ path, worktree: worktreeType(root, path) }));
+  return { tracked, untracked };
+}
+
+/** Pure path/mode classification of an inventory under a policy. */
+function classifyInventory(
+  inventory: Inventory,
+  policy: PathPolicy,
+): Finding[] {
+  const findings: Finding[] = [];
+  const add = (reason: Reason, path: string) => findings.push({ reason, path });
+  const required = new Set([...policy.frozen, ...policy.updates]);
+  const permitted = (path: string) =>
+    required.has(path) || matchesAuthorized(policy.additions, path);
+
+  const present = new Set<string>();
+  for (const entry of inventory.tracked) {
+    if (!permitted(entry.path)) add('unauthorized_addition', entry.path);
+    if (entry.stage !== '0') add('unmerged_entry', entry.path);
+    else present.add(entry.path);
+    if (entry.mode === '120000') add('symbolic_link', entry.path);
+    else if (entry.mode === '160000') add('gitlink', entry.path);
+    else if (entry.mode === '100755') add('executable_mode', entry.path);
+    else if (entry.mode !== REGULAR_MODE) add('unexpected_mode', entry.path);
+    else if (entry.worktree === 'missing') {
+      if (required.has(entry.path)) add('missing_from_worktree', entry.path);
+    } else if (entry.worktree !== 'file')
+      add('worktree_type_mismatch', entry.path);
+  }
+  for (const path of required)
+    if (!present.has(path)) add('missing_from_index', path);
+  for (const entry of inventory.untracked) {
+    if (!permitted(entry.path)) add('unauthorized_addition', entry.path);
+    if (entry.worktree === 'symlink') add('symbolic_link', entry.path);
+    else if (entry.path.endsWith('/') || entry.worktree === 'directory')
+      add('nested_repository', entry.path);
+  }
+
+  const unique = new Map<string, Finding>();
+  for (const f of findings) unique.set(`${f.path}\0${f.reason}`, f);
+  return [...unique.values()].sort((a, b) =>
+    a.path < b.path
+      ? -1
+      : a.path > b.path
+        ? 1
+        : REASONS.indexOf(a.reason) - REASONS.indexOf(b.reason),
+  );
+}
+
+/** Fixed, deterministic diagnostic lines (path JSON-quoted, so spaces show). */
+const formatFindings = (findings: readonly Finding[]): string[] =>
+  findings.map((f) => `${f.reason} ${JSON.stringify(f.path)}`);
+
+const repositoryFindings = (dir: string, policy: PathPolicy): string[] =>
+  formatFindings(classifyInventory(repositoryInventory(dir), policy));
+
+// --- Synthetic throwaway repositories (OS temp directory, never this one) ---
+
+const r4Scratch = mkdtempSync(join(tmpdir(), 'aven-r4-inventory-'));
+afterAll(() => rmSync(r4Scratch, { recursive: true, force: true }));
+const r4EmptyConfig = join(r4Scratch, 'empty.gitconfig');
+writeFileSync(r4EmptyConfig, '');
+let r4Counter = 0;
+const R4_TIMEOUT = { timeout: 60_000 };
+/** The repository's own committed ignore rules, reused verbatim. */
+const REAL_GITIGNORE = readRepoFile('.gitignore');
+
+/** Fixture Git, isolated from user and system configuration. */
+function fixtureGit(dir: string, args: readonly string[]): string {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env))
+    if (!key.toUpperCase().startsWith('GIT_')) env[key] = value;
+  Object.assign(env, {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: r4EmptyConfig,
+    GIT_AUTHOR_NAME: 'Synthetic Fixture',
+    GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Synthetic Fixture',
+    GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+  });
+  return execFileSync(
+    'git',
+    [
+      '-c',
+      'init.defaultBranch=main',
+      '-c',
+      'commit.gpgSign=false',
+      '-c',
+      'core.autocrlf=false',
+      '-C',
+      dir,
+      ...args,
+    ],
+    { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] },
+  ).trim();
+}
+
+/** A small synthetic policy shaped like the real one. */
+const SYNTHETIC_POLICY: PathPolicy = {
+  frozen: new Set([
+    '.editorconfig',
+    '.gitignore',
+    'docs/AVEN_PRINCIPLES.md',
+    'docs/sources/source.txt',
+    'packages/contracts/src/index.ts',
+    'tooling/tests/frozen.test.ts',
+  ]),
+  updates: ['AGENTS.md', 'README.md'],
+  additions: AUTHORIZED_NEW_PATHS,
+};
+
+class InventoryRepo {
+  readonly dir: string;
+  constructor() {
+    this.dir = join(r4Scratch, `repo-${++r4Counter}`);
+    mkdirSync(this.dir);
+    fixtureGit(this.dir, ['init', '-q']);
+    for (const path of [
+      ...SYNTHETIC_POLICY.frozen,
+      ...SYNTHETIC_POLICY.updates,
+    ])
+      this.write(path, path === '.gitignore' ? REAL_GITIGNORE : `${path}\n`);
+    this.commitAll('synthetic baseline');
+  }
+  write(path: string, content: string | Buffer = `synthetic ${path}\n`) {
+    mkdirSync(dirname(join(this.dir, path)), { recursive: true });
+    writeFileSync(join(this.dir, path), content);
+  }
+  git(args: readonly string[]): string {
+    return fixtureGit(this.dir, args);
+  }
+  commitAll(message = 'synthetic change') {
+    this.git(['add', '-A']);
+    this.git(['commit', '-q', '--allow-empty', '-m', message]);
+  }
+  findings(policy: PathPolicy = SYNTHETIC_POLICY): string[] {
+    return repositoryFindings(this.dir, policy);
+  }
+}
+
+/** Whether this host lets an unprivileged process create a symbolic link. */
+const symlinksAvailable = (() => {
+  const target = join(r4Scratch, 'probe-target');
+  writeFileSync(target, 'probe\n');
+  try {
+    symlinkSync(target, join(r4Scratch, 'probe-link'));
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const unauthorized = (...paths: string[]) =>
+  paths.map((p) => `unauthorized_addition ${JSON.stringify(p)}`);
+
+describe('R4 repository-wide addition guard: the real repository', () => {
+  it(
+    '1, 21. inventories the real checkout with no finding (every tracked and untracked path accounted for)',
+    R4_TIMEOUT,
+    () => {
+      const dir = fileURLToPath(repoRoot);
+      const inventory = repositoryInventory(dir);
+      // Every pinned and updatable file is tracked, regular and present.
+      const tracked = new Map(inventory.tracked.map((e) => [e.path, e]));
+      for (const path of [...REAL_POLICY.frozen, ...REAL_POLICY.updates]) {
+        expect(tracked.get(path)?.mode, path).toBe(REGULAR_MODE);
+        expect(tracked.get(path)?.worktree, path).toBe('file');
+      }
+      expect(inventory.tracked.length).toBeGreaterThanOrEqual(231);
+      // A second, independent pass over the 226 pins (through `gateDrift`, not
+      // the first test's loop), so disabling either one alone is still caught.
+      expect(gateDrift(FROZEN_AT_AVEN_009, readRepoFile)).toEqual([]);
+      const findings = formatFindings(
+        classifyInventory(inventory, REAL_POLICY),
+      );
+      // A local checkout holding user-owned, non-ignored files (for example an
+      // untracked outputs directory) fails here and names each path: the guard
+      // requires a clean work tree and never deletes or exempts such files.
+      expect(findings).toEqual([]);
+    },
+  );
+
+  it('22-23. keeps the R3 attribution pins exact and the attribution gate wired and tracked', () => {
+    expect(ACCEPTED_ATTRIBUTION_GATE).toEqual({
+      'tooling/attribution/attribution.test.ts':
+        'bce63089c0fad1a0a535f1d1a2ca155dc82bb616631acec8810e93dec1bedab8',
+      'tooling/attribution/attribution.ts':
+        'c188903c89e665c5db52d4d225f9ffbec5299fec6df0001b5c0d9a5b8e00cea8',
+      'tooling/attribution/check-attribution.ts':
+        'dc01f88b1cffbed66a222a8e7319ee2adfc8a42c68d3f6d16760f1ff00362e4b',
+    });
+    expect(FROZEN_TABLE_DIGEST).toBe(
+      '3ef554a25e15e9ded2daed7d6fee84d65386e6221aa0fd51492e67467af8eb5d',
+    );
+    expect(gateDrift(ACCEPTED_ATTRIBUTION_GATE, readRepoFile)).toEqual([]);
+    const tracked = new Map(
+      repositoryInventory(fileURLToPath(repoRoot)).tracked.map((e) => [
+        e.path,
+        e.mode,
+      ]),
+    );
+    for (const file of Object.keys(ACCEPTED_ATTRIBUTION_GATE))
+      expect(tracked.get(file), file).toBe(REGULAR_MODE);
+    const root = JSON.parse(readRepoFile('package.json').toString('utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(root.scripts['attribution:check']).toBe(
+      'node tooling/attribution/check-attribution.ts',
+    );
+  });
+});
+
+describe('R4 path classification (pure, synthetic inventories)', () => {
+  const inventoryOf = (
+    tracked: readonly string[],
+    untracked: readonly string[] = [],
+  ): Inventory => ({
+    tracked: [
+      ...[...REAL_POLICY.frozen, ...REAL_POLICY.updates].map((path) => ({
+        path,
+        mode: REGULAR_MODE,
+        stage: '0',
+        worktree: 'file' as const,
+      })),
+      ...tracked.map((path) => ({
+        path,
+        mode: REGULAR_MODE,
+        stage: '0',
+        worktree: 'file' as const,
+      })),
+    ],
+    untracked: untracked.map((path) => ({ path, worktree: 'file' as const })),
+  });
+
+  const CODEX_AND_REVIEW_EXAMPLES = [
+    'unreviewed-root.ts',
+    '.github/workflows/unreviewed.yml',
+    '.github/CODEOWNERS',
+    'scripts/unreviewed.js',
+    'packages/contracts/src/extra.ts',
+    'packages/corrections-extra/index.ts',
+    'tooling/unreviewed.ts',
+    'docs/AVEN_010_NOTES.md',
+    'docs/sources/unreviewed.pdf',
+  ];
+
+  it('4-9. rejects every listed root, hidden, workflow, frozen-tree, sibling, tooling and docs addition, tracked or untracked', () => {
+    const sorted = [...CODEX_AND_REVIEW_EXAMPLES].sort();
+    expect(
+      formatFindings(
+        classifyInventory(inventoryOf(CODEX_AND_REVIEW_EXAMPLES), REAL_POLICY),
+      ),
+    ).toEqual(unauthorized(...sorted));
+    expect(
+      formatFindings(
+        classifyInventory(
+          inventoryOf([], CODEX_AND_REVIEW_EXAMPLES),
+          REAL_POLICY,
+        ),
+      ),
+    ).toEqual(unauthorized(...sorted));
+  });
+
+  it('2-3. permits authorized additions and the exact report path only', () => {
+    const allowed = [
+      'packages/corrections/src/new.ts',
+      'packages/corrections/test/deep/nested/x.test.ts',
+      'packages/corrections/bench/with space.ts',
+      'tooling/attribution/notes.md',
+      'docs/AVEN_010_REPORT.md',
+    ];
+    expect(
+      classifyInventory(inventoryOf(allowed, allowed), REAL_POLICY),
+    ).toEqual([]);
+  });
+
+  it('20. rejects prefix look-alikes and near-misses (segment-safe, exact report path)', () => {
+    const lookAlikes = [
+      'packages/corrections-extra/index.ts',
+      'packages/correctionsx/index.ts',
+      'packages/corrections',
+      'Packages/corrections/x.ts',
+      'tooling/attribution-v2/check.ts',
+      'tooling/attribution',
+      'docs/AVEN_010_REPORT.md.bak',
+      'docs/AVEN_010_REPORT.md/x.md',
+      'docs/aven_010_report.md',
+      'docs/AVEN_010_REPORT.MD',
+      'evals/aven-010/cases.jsonl',
+      'docs/aven/notes.md',
+      './packages/corrections/x.ts',
+    ];
+    expect(
+      formatFindings(
+        classifyInventory(inventoryOf([], lookAlikes), REAL_POLICY),
+      ),
+    ).toEqual(unauthorized(...[...lookAlikes].sort()));
+  });
+
+  it('16-17. judges tracked entries by index mode, never as ordinary files', () => {
+    const entry = (path: string, mode: string, worktree: WorktreeType) => ({
+      path,
+      mode,
+      stage: '0',
+      worktree,
+    });
+    const base = inventoryOf([]);
+    const frozen = 'packages/contracts/src/index.ts';
+    const swapped = (replacement: TrackedEntry): Inventory => ({
+      tracked: [
+        ...base.tracked.filter((e) => e.path !== replacement.path),
+        replacement,
+      ],
+      untracked: [],
+    });
+    const cases: [TrackedEntry, string[]][] = [
+      [entry(frozen, '100755', 'file'), [`executable_mode "${frozen}"`]],
+      [entry(frozen, '120000', 'file'), [`symbolic_link "${frozen}"`]],
+      [entry(frozen, '160000', 'directory'), [`gitlink "${frozen}"`]],
+      [entry(frozen, '100664', 'file'), [`unexpected_mode "${frozen}"`]],
+      [
+        entry(frozen, REGULAR_MODE, 'symlink'),
+        [`worktree_type_mismatch "${frozen}"`],
+      ],
+      [
+        entry(frozen, REGULAR_MODE, 'directory'),
+        [`worktree_type_mismatch "${frozen}"`],
+      ],
+      [
+        entry(frozen, REGULAR_MODE, 'missing'),
+        [`missing_from_worktree "${frozen}"`],
+      ],
+      [
+        entry('packages/corrections/link.ts', '120000', 'symlink'),
+        ['symbolic_link "packages/corrections/link.ts"'],
+      ],
+      [
+        entry('packages/corrections/vendor', '160000', 'directory'),
+        ['gitlink "packages/corrections/vendor"'],
+      ],
+      [
+        entry('packages/corrections/run.sh', '100755', 'file'),
+        ['executable_mode "packages/corrections/run.sh"'],
+      ],
+    ];
+    for (const [replacement, expected] of cases)
+      expect(
+        formatFindings(classifyInventory(swapped(replacement), REAL_POLICY)),
+        `${replacement.path} ${replacement.mode} ${replacement.worktree}`,
+      ).toEqual(expected);
+    // A frozen file removed from the index, or left unmerged, fails.
+    expect(
+      formatFindings(
+        classifyInventory(
+          {
+            tracked: base.tracked.filter((e) => e.path !== frozen),
+            untracked: [],
+          },
+          REAL_POLICY,
+        ),
+      ),
+    ).toEqual([`missing_from_index "${frozen}"`]);
+    expect(
+      formatFindings(
+        classifyInventory(
+          swapped({ ...entry(frozen, REGULAR_MODE, 'file'), stage: '2' }),
+          REAL_POLICY,
+        ),
+      ),
+    ).toEqual([`missing_from_index "${frozen}"`, `unmerged_entry "${frozen}"`]);
+  });
+
+  it('15. flags untracked symbolic links and nested repositories even under an authorized prefix', () => {
+    expect(
+      formatFindings(
+        classifyInventory(
+          {
+            tracked: inventoryOf([]).tracked,
+            untracked: [
+              { path: 'packages/corrections/link.ts', worktree: 'symlink' },
+              { path: 'packages/corrections/nested/', worktree: 'directory' },
+              { path: 'linked-dir', worktree: 'symlink' },
+            ],
+          },
+          REAL_POLICY,
+        ),
+      ),
+    ).toEqual([
+      'unauthorized_addition "linked-dir"',
+      'symbolic_link "linked-dir"',
+      'symbolic_link "packages/corrections/link.ts"',
+      'nested_repository "packages/corrections/nested/"',
+    ]);
+  });
+
+  it('24. is deterministic: input order never changes the findings or their order', () => {
+    const inventory = inventoryOf(
+      ['z-root.ts', 'a-root.ts', '.hidden/x', 'docs/new.md'],
+      ['b root.ts', '.github/workflows/w.yml'],
+    );
+    const expected = formatFindings(classifyInventory(inventory, REAL_POLICY));
+    expect(expected).toEqual(
+      unauthorized(
+        '.github/workflows/w.yml',
+        '.hidden/x',
+        'a-root.ts',
+        'b root.ts',
+        'docs/new.md',
+        'z-root.ts',
+      ),
+    );
+    const reversed: Inventory = {
+      tracked: [...inventory.tracked].reverse(),
+      untracked: [...inventory.untracked].reverse(),
+    };
+    expect(formatFindings(classifyInventory(reversed, REAL_POLICY))).toEqual(
+      expected,
+    );
+    // The same path listed twice is reported once.
+    const doubled: Inventory = {
+      tracked: [...inventory.tracked, ...inventory.tracked],
+      untracked: inventory.untracked,
+    };
+    expect(formatFindings(classifyInventory(doubled, REAL_POLICY))).toEqual(
+      expected,
+    );
+  });
+});
+
+describe('R4 repository-wide addition guard over real temporary Git repositories', () => {
+  it(
+    '1-3. passes a clean repository and authorized additions (committed, staged and untracked)',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      expect(repo.findings()).toEqual([]);
+      repo.write('packages/corrections/src/committed.ts');
+      repo.write('tooling/attribution/committed.ts');
+      repo.commitAll();
+      repo.write('packages/corrections/test/staged.test.ts');
+      repo.git(['add', 'packages/corrections/test/staged.test.ts']);
+      repo.write('packages/corrections/bench/untracked.ts');
+      repo.write('docs/AVEN_010_REPORT.md');
+      expect(repo.findings()).toEqual([]);
+    },
+  );
+
+  it(
+    '4-12. rejects root, hidden-root, workflow, frozen-tree, sibling, tooling and docs additions whether committed, staged or untracked',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      // Codex's F4 reproduction, committed.
+      repo.write('unreviewed-root.ts');
+      repo.write('.github/workflows/unreviewed.yml');
+      repo.commitAll();
+      // Staged but not committed.
+      repo.write('.github/CODEOWNERS');
+      repo.write('packages/contracts/src/extra.ts');
+      repo.git([
+        'add',
+        '.github/CODEOWNERS',
+        'packages/contracts/src/extra.ts',
+      ]);
+      // Untracked and not ignored.
+      for (const path of [
+        'scripts/unreviewed.js',
+        'packages/corrections-extra/index.ts',
+        'tooling/unreviewed.ts',
+        'docs/AVEN_010_NOTES.md',
+        'docs/sources/unreviewed.pdf',
+        'docs/new-dir/notes.md',
+      ])
+        repo.write(path);
+      expect(repo.findings()).toEqual(
+        unauthorized(
+          '.github/CODEOWNERS',
+          '.github/workflows/unreviewed.yml',
+          'docs/AVEN_010_NOTES.md',
+          'docs/new-dir/notes.md',
+          'docs/sources/unreviewed.pdf',
+          'packages/contracts/src/extra.ts',
+          'packages/corrections-extra/index.ts',
+          'scripts/unreviewed.js',
+          'tooling/unreviewed.ts',
+          'unreviewed-root.ts',
+        ),
+      );
+    },
+  );
+
+  it(
+    '13-14. ignores ignored local artifacts, but checks any that are force-added',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      const artifacts = [
+        'node_modules/pkg/index.js',
+        'packages/corrections/node_modules/x/index.js',
+        '.local/cache.json',
+        '.tooling-cache/state',
+        'dist/out.js',
+        'coverage/lcov.info',
+        'data/owner.sqlite',
+        '.aven/state.db',
+        'local.sqlite3',
+        'local.db-journal',
+        '.env',
+        '.env.local',
+        'Thumbs.db',
+        '.DS_Store',
+        'tsconfig.tsbuildinfo',
+      ];
+      for (const path of artifacts) repo.write(path);
+      expect(repo.findings()).toEqual([]);
+      repo.git(['add', '-f', '.env', 'node_modules/pkg/index.js']);
+      expect(repo.findings()).toEqual(
+        unauthorized('.env', 'node_modules/pkg/index.js'),
+      );
+      repo.git(['commit', '-q', '-m', 'force-added ignored files']);
+      expect(repo.findings()).toEqual(
+        unauthorized('.env', 'node_modules/pkg/index.js'),
+      );
+      // A force-added ignored file under an authorized prefix is an authorized
+      // path, and stays a tracked regular file.
+      repo.git(['add', '-f', 'packages/corrections/node_modules/x/index.js']);
+      expect(repo.findings()).toEqual(
+        unauthorized('.env', 'node_modules/pkg/index.js'),
+      );
+    },
+  );
+
+  it(
+    '15. sees symbolic links in the index (any host) and in the work tree (where the host allows)',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      // Synthetic index entries need no filesystem symlink support.
+      const object = fixtureGit(repo.dir, [
+        'hash-object',
+        '-w',
+        '.editorconfig',
+      ]);
+      repo.git([
+        'update-index',
+        '--add',
+        '--cacheinfo',
+        `120000,${object},packages/corrections/index-link.ts`,
+      ]);
+      expect(repo.findings()).toEqual([
+        'symbolic_link "packages/corrections/index-link.ts"',
+      ]);
+      if (!symlinksAvailable) return; // Documented: index-only on such hosts.
+      const outside = join(r4Scratch, `outside-${++r4Counter}`);
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'secret.txt'), 'outside\n');
+      // An untracked link to a directory outside the repository is listed
+      // once and never followed.
+      symlinkSync(outside, join(repo.dir, 'linked-outside'));
+      // A frozen file replaced by a link in the work tree only.
+      rmSync(join(repo.dir, 'docs/AVEN_PRINCIPLES.md'));
+      symlinkSync(
+        join(outside, 'secret.txt'),
+        join(repo.dir, 'docs/AVEN_PRINCIPLES.md'),
+      );
+      expect(repo.findings()).toEqual([
+        'worktree_type_mismatch "docs/AVEN_PRINCIPLES.md"',
+        'unauthorized_addition "linked-outside"',
+        'symbolic_link "linked-outside"',
+        'symbolic_link "packages/corrections/index-link.ts"',
+      ]);
+      // Committing a real link records mode 120000 in the index.
+      mkdirSync(join(repo.dir, 'packages/corrections'), { recursive: true });
+      symlinkSync(
+        join(outside, 'secret.txt'),
+        join(repo.dir, 'packages/corrections/real-link.ts'),
+      );
+      repo.git(['add', 'packages/corrections/real-link.ts']);
+      expect(repo.findings()).toContain(
+        'symbolic_link "packages/corrections/real-link.ts"',
+      );
+    },
+  );
+
+  it('15. never follows a link when hashing a pinned file', R4_TIMEOUT, () => {
+    const dir = join(r4Scratch, `links-${++r4Counter}`);
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'real.txt'), 'pinned bytes\n');
+    expect(readRegular(join(dir, 'real.txt')).toString()).toBe(
+      'pinned bytes\n',
+    );
+    expect(() => readRegular(dir)).toThrow('not a regular file');
+    if (!symlinksAvailable) return; // Documented: no link to read on such hosts.
+    symlinkSync(join(dir, 'real.txt'), join(dir, 'link.txt'));
+    expect(() => readRegular(join(dir, 'link.txt'))).toThrow(
+      'not a regular file',
+    );
+  });
+
+  it(
+    '16-17. detects tracked mode changes, gitlinks and nested repositories',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.git([
+        'update-index',
+        '--chmod=+x',
+        'packages/contracts/src/index.ts',
+      ]);
+      expect(repo.findings()).toEqual([
+        'executable_mode "packages/contracts/src/index.ts"',
+      ]);
+      repo.git([
+        'update-index',
+        '--chmod=-x',
+        'packages/contracts/src/index.ts',
+      ]);
+      expect(repo.findings()).toEqual([]);
+      const head = repo.git(['rev-parse', 'HEAD']);
+      repo.git([
+        'update-index',
+        '--add',
+        '--cacheinfo',
+        `160000,${head},packages/corrections/vendor`,
+      ]);
+      // An untracked nested repository is listed as a directory entry.
+      const nested = join(repo.dir, 'packages/corrections/nested');
+      mkdirSync(nested, { recursive: true });
+      fixtureGit(nested, ['init', '-q']);
+      writeFileSync(join(nested, 'file.ts'), 'nested\n');
+      fixtureGit(nested, ['add', '-A']);
+      fixtureGit(nested, ['commit', '-q', '-m', 'nested']);
+      expect(repo.findings()).toEqual([
+        'nested_repository "packages/corrections/nested/"',
+        'gitlink "packages/corrections/vendor"',
+      ]);
+    },
+  );
+
+  it(
+    '18. treats a linked worktree (a .git pointer file) like an ordinary checkout',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      const linked = join(r4Scratch, `worktree-${++r4Counter}`);
+      repo.git(['worktree', 'add', '-q', '--detach', linked]);
+      expect(lstatSync(join(linked, '.git')).isFile()).toBe(true);
+      expect(repositoryFindings(linked, SYNTHETIC_POLICY)).toEqual([]);
+      writeFileSync(join(linked, 'unreviewed-root.ts'), 'x\n');
+      expect(repositoryFindings(linked, SYNTHETIC_POLICY)).toEqual(
+        unauthorized('unreviewed-root.ts'),
+      );
+      // The main checkout does not see the linked worktree's files.
+      expect(repo.findings()).toEqual([]);
+    },
+  );
+
+  it(
+    '19. handles paths with spaces and other punctuation exactly',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.write('packages/corrections/test/with space.ts');
+      repo.write("packages/corrections/test/quote's & semi;colon.ts");
+      repo.write('docs/notes with space.md');
+      repo.write('new dir/a b.ts');
+      repo.commitAll();
+      repo.write('another dir/c d.ts');
+      expect(repo.findings()).toEqual(
+        unauthorized(
+          'another dir/c d.ts',
+          'docs/notes with space.md',
+          'new dir/a b.ts',
+        ),
+      );
+    },
+  );
+
+  it(
+    '24. reports the same findings, in the same order, on every run',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      for (const path of ['z.ts', 'a.ts', '.hidden/x.ts', 'docs/b.md'])
+        repo.write(path);
+      repo.git(['add', 'z.ts']);
+      const first = repo.findings();
+      expect(first).toEqual(
+        unauthorized('.hidden/x.ts', 'a.ts', 'docs/b.md', 'z.ts'),
+      );
+      for (let i = 0; i < 3; i += 1) expect(repo.findings()).toEqual(first);
+    },
+  );
+
+  it(
+    '25. fails closed when the repository redirects its work tree elsewhere',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      const elsewhere = new InventoryRepo();
+      repo.git(['config', 'core.worktree', elsewhere.dir]);
+      expect(() => repositoryInventory(repo.dir)).toThrow(InventoryUnavailable);
+      // A work tree configured at an ANCESTOR of the inspected directory: Git
+      // reports it as inside a work tree, but not as its root, and would list
+      // paths relative to the subdirectory only.
+      const outer = join(r4Scratch, `outer-${++r4Counter}`);
+      const inner = join(outer, 'inner');
+      mkdirSync(inner, { recursive: true });
+      fixtureGit(inner, ['init', '-q']);
+      fixtureGit(inner, ['config', 'core.worktree', outer]);
+      writeFileSync(join(outer, 'outside-file.ts'), 'x\n');
+      expect(fixtureGit(inner, ['rev-parse', '--is-inside-work-tree'])).toBe(
+        'true',
+      );
+      expect(() => repositoryInventory(inner)).toThrow(InventoryUnavailable);
+    },
+  );
+
+  it(
+    "13. applies only committed and repository-local ignore rules, never the user's global excludes",
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.write('unreviewed-root.ts');
+      repo.write('.github/workflows/unreviewed.yml');
+      const home = join(r4Scratch, `home-${++r4Counter}`);
+      mkdirSync(join(home, 'xdg', 'git'), { recursive: true });
+      writeFileSync(join(home, 'global-ignore'), 'unreviewed-root.ts\n');
+      writeFileSync(join(home, 'xdg', 'git', 'ignore'), '.github/\n');
+      writeFileSync(
+        join(home, '.gitconfig'),
+        `[core]\n\texcludesFile = ${join(home, 'global-ignore').replace(/\\/g, '/')}\n`,
+      );
+      const overrides: Record<string, string> = {
+        HOME: home,
+        USERPROFILE: home,
+        XDG_CONFIG_HOME: join(home, 'xdg'),
+      };
+      const saved = Object.fromEntries(
+        Object.keys(overrides).map((k) => [k, process.env[k]]),
+      );
+      Object.assign(process.env, overrides);
+      try {
+        expect(repo.findings()).toEqual(
+          unauthorized(
+            '.github/workflows/unreviewed.yml',
+            'unreviewed-root.ts',
+          ),
+        );
+      } finally {
+        for (const [k, v] of Object.entries(saved))
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+      }
+      // The repository-local exclude file hides an UNTRACKED path exactly as
+      // `git add -A` would skip it; it can never hide a tracked or staged one.
+      writeFileSync(
+        join(repo.dir, '.git', 'info', 'exclude'),
+        'unreviewed-root.ts\n',
+      );
+      expect(repo.findings()).toEqual(
+        unauthorized('.github/workflows/unreviewed.yml'),
+      );
+      repo.git(['add', '-f', 'unreviewed-root.ts']);
+      expect(repo.findings()).toEqual(
+        unauthorized('.github/workflows/unreviewed.yml', 'unreviewed-root.ts'),
+      );
+    },
+  );
+
+  it(
+    '25. fails closed without usable Git metadata, outside the work-tree root, or with inherited Git overrides',
+    R4_TIMEOUT,
+    () => {
+      const plain = join(r4Scratch, `plain-${++r4Counter}`);
+      mkdirSync(plain);
+      expect(() => repositoryInventory(plain)).toThrow(InventoryUnavailable);
+      expect(() =>
+        repositoryInventory(join(r4Scratch, 'does-not-exist')),
+      ).toThrow(InventoryUnavailable);
+      const repo = new InventoryRepo();
+      // A subdirectory is not the work-tree root.
+      expect(() => repositoryInventory(join(repo.dir, 'packages'))).toThrow(
+        InventoryUnavailable,
+      );
+      // A dangling worktree pointer.
+      const broken = join(r4Scratch, `broken-${++r4Counter}`);
+      mkdirSync(broken);
+      writeFileSync(join(broken, '.git'), 'gitdir: /nonexistent/aven/gitdir\n');
+      expect(() => repositoryInventory(broken)).toThrow(InventoryUnavailable);
+      // Corrupted index.
+      const corrupt = new InventoryRepo();
+      writeFileSync(join(corrupt.dir, '.git', 'index'), 'not an index');
+      expect(() => repositoryInventory(corrupt.dir)).toThrow(
+        InventoryUnavailable,
+      );
+      // Inherited GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE pointing elsewhere
+      // cannot redirect the inventory away from a dirty repository.
+      const clean = new InventoryRepo();
+      const dirty = new InventoryRepo();
+      dirty.write('unreviewed-root.ts');
+      const overrides: Record<string, string> = {
+        GIT_DIR: join(clean.dir, '.git'),
+        GIT_WORK_TREE: clean.dir,
+        GIT_INDEX_FILE: join(clean.dir, '.git', 'index'),
+      };
+      const saved = Object.fromEntries(
+        Object.keys(overrides).map((k) => [k, process.env[k]]),
+      );
+      Object.assign(process.env, overrides);
+      try {
+        expect(dirty.findings()).toEqual(unauthorized('unreviewed-root.ts'));
+      } finally {
+        for (const [k, v] of Object.entries(saved))
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+      }
+    },
+  );
 });
