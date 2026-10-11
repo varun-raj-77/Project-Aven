@@ -15,6 +15,11 @@ import { dirname, resolve } from 'node:path';
  *     an unresolvable HEAD fails closed (nothing is assumed);
  *   - author and committer are each exactly Claude <noreply@anthropic.com> or
  *     the owner with the verified owner email;
+ *   - a Claude-authored commit is also COMMITTED by exactly
+ *     Claude <noreply@anthropic.com>: any other committer, the owner
+ *     included, is `author_committer_mismatch` (Codex audit F3, remediation
+ *     R3), reported beside any unknown-identity or wrong-email code. The
+ *     committer rule for owner-authored commits is unchanged;
  *   - a Claude-authored commit carries EXACTLY ONE byte-exact
  *     `Co-authored-by: Varun Karthik <varunraj2117@gmail.com>` that Git itself
  *     parses as a trailer (`%(trailers:only,unfold)`), and that line appears
@@ -72,6 +77,7 @@ export const VIOLATION_CODES = Object.freeze([
   'merge_commit',
   'unknown_author',
   'unknown_committer',
+  'author_committer_mismatch',
   'incorrect_owner_email',
   'missing_owner_trailer',
   'duplicate_owner_trailer',
@@ -173,6 +179,10 @@ export function evaluateCommit(commit: CommitRecord): CommitResult {
     violations.push(
       ownerLike(committer) ? 'incorrect_owner_email' : 'unknown_committer',
     );
+  // The identity relationship, not only each allowlist: Claude authors are
+  // committed by Claude, exactly.
+  if (authoredBy === 'claude' && !sameIdentity(committer, CLAUDE_IDENTITY))
+    violations.push('author_committer_mismatch');
 
   const parsed = commit.trailers.map((t) => t.replace(/\r$/, ''));
   const parsedExact = parsed.filter((t) => t === OWNER_CO_AUTHOR_TRAILER);

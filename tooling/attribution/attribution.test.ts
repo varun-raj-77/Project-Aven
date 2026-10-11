@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   checkAttribution,
@@ -554,7 +554,8 @@ describe('checkAttribution over real synthetic Git history', () => {
     repo.commit({ author: { name: 'Claude', email: 'claude@example.com' } });
     expect(repo.check().commits.map((c) => c.violations)).toEqual([
       ['incorrect_owner_email'],
-      ['unknown_committer'],
+      // R3: a Claude author committed by anyone else is also a mismatch.
+      ['unknown_committer', 'author_committer_mismatch'],
       ['unknown_author', 'unknown_committer'],
     ]);
   });
@@ -736,6 +737,461 @@ describe('checkAttribution over real synthetic Git history', () => {
         lines.filter((l) => l.includes('violations=missing_owner_trailer')),
       ).toHaveLength(1);
       expect(formatReport(repo.check())).toEqual(lines);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Codex audit remediation R3 (finding F3): the author/committer relationship.
+// A Claude-authored commit must also be committed by exactly Claude; each
+// identity being independently allowlisted is not enough. Owner-authored
+// commits keep the accepted patch-1 rules. Identities are the gate's fixed
+// constants or invented synthetic ones; nothing here infers who typed a
+// commit.
+// ---------------------------------------------------------------------------
+
+const OWNER_COMMITTERS: readonly Identity[] = OWNER_AUTHOR_NAMES.map(
+  (name) => ({ name, email: OWNER_IDENTITY.email }),
+);
+
+describe('R3 author/committer relationship (pure rules, synthetic records)', () => {
+  const committedBy = (
+    committer: Identity,
+    extra: Partial<CommitRecord> = {},
+  ) =>
+    evaluateCommit(
+      record({
+        committerName: committer.name,
+        committerEmail: committer.email,
+        ...extra,
+      }),
+    );
+
+  it('pins the full violation code order, with the new code after the identity codes', () => {
+    expect(VIOLATION_CODES).toEqual([
+      'not_a_git_repository',
+      'shallow_history',
+      'baseline_missing',
+      'baseline_tag_missing',
+      'baseline_tag_mismatch',
+      'head_unresolved',
+      'baseline_not_ancestor',
+      'history_not_linear',
+      'root_commit',
+      'merge_commit',
+      'unknown_author',
+      'unknown_committer',
+      'author_committer_mismatch',
+      'incorrect_owner_email',
+      'missing_owner_trailer',
+      'duplicate_owner_trailer',
+      'unparsed_owner_attribution',
+      'malformed_owner_attribution',
+      'unexpected_co_author',
+    ]);
+  });
+
+  it('1. passes a Claude author committed by Claude with the valid owner trailer', () => {
+    const result = committedBy(CLAUDE_IDENTITY);
+    expect(result.violations).toEqual([]);
+    expect(result.authoredBy).toBe('claude');
+    expect(result.committer).toEqual(CLAUDE_IDENTITY);
+  });
+
+  it.each(OWNER_COMMITTERS.map((c) => [c.name, c] as const))(
+    '2-3. rejects a Claude author committed by the owner as %s (author_committer_mismatch only)',
+    (_name, committer) => {
+      const result = committedBy(committer);
+      expect(result.violations).toEqual(['author_committer_mismatch']);
+      expect(result.authoredBy).toBe('claude');
+      // The trailer is still recognised: the failure is the relationship.
+      expect(result.ownerTrailer).toBe(OWNER_LINE);
+    },
+  );
+
+  it('4. rejects a Claude author committed by a CI bot with both precise codes', () => {
+    expect(
+      committedBy({ name: 'CI Bot', email: 'ci@example.com' }).violations,
+    ).toEqual(['unknown_committer', 'author_committer_mismatch']);
+  });
+
+  it.each<[string, Identity, string[]]>([
+    [
+      'Claude with another email',
+      { name: 'Claude', email: 'claude@example.com' },
+      ['unknown_committer', 'author_committer_mismatch'],
+    ],
+    [
+      'Claude with a case-changed email',
+      { name: 'Claude', email: 'NoReply@anthropic.com' },
+      ['unknown_committer', 'author_committer_mismatch'],
+    ],
+    [
+      'another Claude name, exact email',
+      { name: 'Claude Code', email: CLAUDE_IDENTITY.email },
+      ['unknown_committer', 'author_committer_mismatch'],
+    ],
+    [
+      'Claude with trailing whitespace in the name',
+      { name: 'Claude ', email: CLAUDE_IDENTITY.email },
+      ['unknown_committer', 'author_committer_mismatch'],
+    ],
+    [
+      'the owner name with a wrong email',
+      { name: 'Varun Karthik', email: 'varunraj.other@example.com' },
+      ['author_committer_mismatch', 'incorrect_owner_email'],
+    ],
+    [
+      'the owner handle with a wrong email',
+      { name: 'varun-raj-77', email: 'varun@example.com' },
+      ['author_committer_mismatch', 'incorrect_owner_email'],
+    ],
+    [
+      'an unrelated name with the owner email',
+      { name: 'Synthetic Person', email: OWNER_IDENTITY.email },
+      ['unknown_committer', 'author_committer_mismatch'],
+    ],
+  ])(
+    '5. rejects a Claude author committed by %s, keeping the specific identity code',
+    (_label, committer, codes) => {
+      expect(committedBy(committer).violations).toEqual(codes);
+    },
+  );
+
+  it('6. still rejects a missing owner trailer, and reports it beside a mismatch', () => {
+    const noTrailer = {
+      message: message(TOOLING_TRAILERS),
+      trailers: TOOLING_TRAILERS,
+    };
+    expect(committedBy(CLAUDE_IDENTITY, noTrailer).violations).toEqual([
+      'missing_owner_trailer',
+    ]);
+    expect(committedBy(OWNER_COMMITTERS[0]!, noTrailer).violations).toEqual([
+      'author_committer_mismatch',
+      'missing_owner_trailer',
+    ]);
+  });
+
+  it('7. still rejects malformed or duplicate owner attribution beside the relationship rule', () => {
+    const wrongCase = 'Co-Authored-By: Varun Karthik <varunraj2117@gmail.com>';
+    expect(
+      committedBy(CLAUDE_IDENTITY, {
+        message: message([wrongCase]),
+        trailers: [wrongCase],
+      }).violations,
+    ).toEqual(['missing_owner_trailer', 'malformed_owner_attribution']);
+    expect(
+      committedBy(OWNER_COMMITTERS[1]!, {
+        message: message([OWNER_LINE, OWNER_LINE]),
+        trailers: [OWNER_LINE, OWNER_LINE],
+      }).violations,
+    ).toEqual(['author_committer_mismatch', 'duplicate_owner_trailer']);
+  });
+
+  it('8. keeps the accepted owner-authored rules: verified email, either committer, no trailer required', () => {
+    for (const author of OWNER_COMMITTERS)
+      for (const committer of [...OWNER_COMMITTERS, CLAUDE_IDENTITY]) {
+        const result = evaluateCommit(
+          record({
+            authorName: author.name,
+            authorEmail: author.email,
+            committerName: committer.name,
+            committerEmail: committer.email,
+            message: 'chore: owner synthetic\n',
+            trailers: [],
+          }),
+        );
+        expect(result.authoredBy, `${author.name}/${committer.name}`).toBe(
+          'owner',
+        );
+        expect(result.violations, `${author.name}/${committer.name}`).toEqual(
+          [],
+        );
+      }
+    // An owner commit carrying the owner trailer is still accepted as before.
+    expect(
+      evaluateCommit(
+        record({
+          authorName: 'Varun Karthik',
+          authorEmail: OWNER_IDENTITY.email,
+        }),
+      ).violations,
+    ).toEqual([]);
+    // An owner author with an unknown committer stays a plain identity
+    // failure, never a relationship code.
+    expect(
+      evaluateCommit(
+        record({
+          authorName: 'Varun Karthik',
+          authorEmail: OWNER_IDENTITY.email,
+          committerName: 'CI Bot',
+          committerEmail: 'ci@example.com',
+          message: 'chore: owner synthetic\n',
+          trailers: [],
+        }),
+      ).violations,
+    ).toEqual(['unknown_committer']);
+  });
+
+  it('9. rejects an owner author with a wrong or look-alike email (no broadening)', () => {
+    for (const email of [
+      'varunraj.other@example.com',
+      'Varunraj2117@gmail.com',
+      'varunraj2117@gmail.com ',
+      'varunraj2117@googlemail.com',
+    ]) {
+      const result = evaluateCommit(
+        record({
+          authorName: 'Varun Karthik',
+          authorEmail: email,
+          committerName: 'Varun Karthik',
+          committerEmail: email,
+          message: 'chore: owner synthetic\n',
+          trailers: [],
+        }),
+      );
+      expect(result.authoredBy, email).toBe('unknown');
+      expect(result.violations, email).toEqual(['incorrect_owner_email']);
+    }
+  });
+
+  it('13. is deterministic and reports every code in fixed order', () => {
+    const input = record({
+      parents: [],
+      committerName: 'CI Bot',
+      committerEmail: 'ci@example.com',
+      message: message([
+        ...TOOLING_TRAILERS,
+        'Co-authored-by: Someone Else <someone@example.com>',
+      ]),
+      trailers: [
+        ...TOOLING_TRAILERS,
+        'Co-authored-by: Someone Else <someone@example.com>',
+      ],
+    });
+    const copy = structuredClone(input);
+    const first = evaluateCommit(input);
+    expect(first.violations).toEqual([
+      'root_commit',
+      'unknown_committer',
+      'author_committer_mismatch',
+      'missing_owner_trailer',
+      'unexpected_co_author',
+    ]);
+    for (let i = 0; i < 5; i += 1) expect(evaluateCommit(input)).toEqual(first);
+    expect(input).toEqual(copy);
+    const order = first.violations.map((v) => VIOLATION_CODES.indexOf(v));
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
+
+describe('R3 author/committer relationship over real synthetic Git history', () => {
+  it(
+    '2-5, 11. checks the committer of every real Claude-authored commit',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      const good = repo.commit();
+      const byOwner = repo.commit({ committer: OWNER_COMMITTERS[0]! });
+      const byHandle = repo.commit({ committer: OWNER_COMMITTERS[1]! });
+      const byBot = repo.commit({
+        committer: { name: 'CI Bot', email: 'ci@example.com' },
+      });
+      const byWrongClaude = repo.commit({
+        committer: { name: 'Claude', email: 'claude@example.com' },
+      });
+      const report = repo.check();
+      expect(report.ok).toBe(false);
+      expect(report.repositoryViolations).toEqual([]);
+      expect(report.commits.map((c) => [c.sha, c.violations])).toEqual([
+        [good, []],
+        [byOwner, ['author_committer_mismatch']],
+        [byHandle, ['author_committer_mismatch']],
+        [byBot, ['unknown_committer', 'author_committer_mismatch']],
+        [byWrongClaude, ['unknown_committer', 'author_committer_mismatch']],
+      ]);
+      const lines = formatReport(report);
+      expect(lines).toContain(
+        `${byOwner} FAIL author=Claude <noreply@anthropic.com> committer=Varun Karthik <varunraj2117@gmail.com> owner-trailer=${OWNER_LINE} violations=author_committer_mismatch`,
+      );
+      expect(lines.at(-1)).toBe(
+        'FAIL: 5 commit(s) checked after aven-009-synthetic; 4 failure(s).',
+      );
+    },
+  );
+
+  it(
+    '6-7. rejects missing and malformed owner trailers in real commits committed by Claude',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      repo.commit({ body: message(TOOLING_TRAILERS) });
+      repo.commit({
+        body: message([
+          'Co-authored-by: Varun Karthik <varunraj.other@example.com>',
+        ]),
+      });
+      expect(repo.check().commits.map((c) => c.violations)).toEqual([
+        ['missing_owner_trailer'],
+        ['missing_owner_trailer', 'malformed_owner_attribution'],
+      ]);
+    },
+  );
+
+  it(
+    '8-9. keeps real owner-authored commits valid with either accepted committer and rejects a wrong owner email',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      const owner = { body: 'chore: owner synthetic\n' };
+      repo.commit({ ...owner, author: OWNER_COMMITTERS[0]! });
+      repo.commit({ ...owner, author: OWNER_COMMITTERS[1]! });
+      repo.commit({
+        ...owner,
+        author: OWNER_COMMITTERS[0]!,
+        committer: CLAUDE_IDENTITY,
+      });
+      repo.commit({
+        ...owner,
+        author: OWNER_COMMITTERS[1]!,
+        committer: OWNER_COMMITTERS[0]!,
+      });
+      const passing = repo.check();
+      expect(passing.ok).toBe(true);
+      expect(passing.commits.map((c) => c.authoredBy)).toEqual([
+        'owner',
+        'owner',
+        'owner',
+        'owner',
+      ]);
+      repo.commit({
+        ...owner,
+        author: { name: 'Varun Karthik', email: 'varunraj.other@example.com' },
+      });
+      expect(repo.check().commits.at(-1)!.violations).toEqual([
+        'incorrect_owner_email',
+      ]);
+    },
+  );
+
+  it(
+    '10. fails a longer valid history on one mixed-identity commit that is not HEAD',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      const shas = [repo.commit(), repo.commit(), repo.commit()];
+      const mixed = repo.commit({ committer: OWNER_COMMITTERS[0]! });
+      shas.push(mixed);
+      for (let i = 0; i < 4; i += 1) shas.push(repo.commit());
+      const report = repo.check();
+      expect(report.ok).toBe(false);
+      expect(report.head).toBe(shas.at(-1));
+      expect(report.commits.map((c) => c.sha)).toEqual(shas);
+      expect(
+        report.commits
+          .filter((c) => c.violations.length > 0)
+          .map((c) => [c.sha, c.violations]),
+      ).toEqual([[mixed, ['author_committer_mismatch']]]);
+      expect(report.commits.at(-1)!.violations).toEqual([]);
+    },
+  );
+
+  it(
+    '11. passes a history where every commit is exactly Claude-authored and Claude-committed',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      for (let i = 0; i < 6; i += 1) repo.commit();
+      const report = repo.check();
+      expect(report.ok).toBe(true);
+      expect(report.commits).toHaveLength(6);
+      for (const c of report.commits) {
+        expect(c.author).toEqual(CLAUDE_IDENTITY);
+        expect(c.committer).toEqual(CLAUDE_IDENTITY);
+        expect(c.ownerTrailer).toBe(OWNER_LINE);
+      }
+    },
+  );
+
+  it(
+    '14. reads recorded committers only: inherited GIT_* overrides, a mailmap and git replace do not hide a mismatch',
+    real,
+    () => {
+      const repo = new SyntheticRepo();
+      const mixed = repo.commit({ committer: OWNER_COMMITTERS[0]! });
+      // A decoy, exactly attributed commit to substitute for the mixed one.
+      repo.git(['checkout', '-q', '-b', 'decoy', repo.baseline]);
+      const decoy = repo.commit();
+      repo.git(['checkout', '-q', 'main']);
+      repo.git(['replace', mixed, decoy]);
+      // A mailmap mapping the owner committer onto Claude (affects %cN, never
+      // the %cn the gate reads).
+      writeFileSync(
+        join(repo.dir, '.mailmap'),
+        `Claude <noreply@anthropic.com> Varun Karthik <varunraj2117@gmail.com>\n`,
+      );
+      repo.git(['config', 'mailmap.file', join(repo.dir, '.mailmap')]);
+      const overrides: Record<string, string> = {
+        GIT_COMMITTER_NAME: CLAUDE_IDENTITY.name,
+        GIT_COMMITTER_EMAIL: CLAUDE_IDENTITY.email,
+        GIT_AUTHOR_NAME: CLAUDE_IDENTITY.name,
+        GIT_AUTHOR_EMAIL: CLAUDE_IDENTITY.email,
+        GIT_REPLACE_REF_BASE: 'refs/replace/',
+        GIT_NO_REPLACE_OBJECTS: '0',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'log.mailmap',
+        GIT_CONFIG_VALUE_0: 'true',
+      };
+      const saved = Object.fromEntries(
+        Object.keys(overrides).map((k) => [k, process.env[k]]),
+      );
+      Object.assign(process.env, overrides);
+      try {
+        const report = repo.check();
+        expect(report.ok).toBe(false);
+        expect(report.commits.map((c) => [c.sha, c.violations])).toEqual([
+          [mixed, ['author_committer_mismatch']],
+        ]);
+        expect(report.commits[0]!.committer).toEqual(OWNER_COMMITTERS[0]);
+      } finally {
+        for (const [k, v] of Object.entries(saved))
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+      }
+    },
+  );
+});
+
+describe('R3 stronger rule over the real AVEN-010 history (read-only)', () => {
+  /** The seven AVEN-010 commits accepted before R3, oldest first. */
+  const ACCEPTED_BEFORE_R3 = [
+    '19bc92b7d789877dc3f760184d0889a9c2b8dc91',
+    '9da05c7430d11990ba232eca5045aeb954bd39a9',
+    'c9f4d417978d3bf1a9b9d42b7a7cd4d2b2cdc5ac',
+    '9c284c0e3c73f3d12739b8edcb92e02d215a5014',
+    '8de38fdc4d27125f412b7cfc29a3f1d617596e84',
+    '2a0670528839117d27c0b6883e5ee2a75381a31e',
+    '2e91eeb733d757a5d978475103587100a3e4946a',
+  ];
+
+  it(
+    '12. passes the seven accepted AVEN-010 commits unchanged, each authored and committed by Claude',
+    real,
+    () => {
+      const report = checkAttribution({
+        repoDir: fileURLToPath(new URL('../..', import.meta.url)),
+        baseline: FROZEN_BASELINE,
+      });
+      expect(report.repositoryViolations).toEqual([]);
+      const first = report.commits.slice(0, ACCEPTED_BEFORE_R3.length);
+      expect(first.map((c) => c.sha)).toEqual(ACCEPTED_BEFORE_R3);
+      for (const c of first) {
+        expect(c.violations, c.sha).toEqual([]);
+        expect(c.authoredBy).toBe('claude');
+        expect(c.author).toEqual(CLAUDE_IDENTITY);
+        expect(c.committer).toEqual(CLAUDE_IDENTITY);
+        expect(c.ownerTrailer).toBe(OWNER_LINE);
+      }
     },
   );
 });

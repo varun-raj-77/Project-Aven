@@ -526,18 +526,53 @@ const AUTHORIZED_NEW_PATHS = [
 ];
 
 /**
- * The attribution gate accepted in AVEN-010 patch 1 (commit
- * 19bc92b7d789877dc3f760184d0889a9c2b8dc91), pinned so later patches cannot
- * weaken it silently. Changing it needs its own reviewed change to this table.
+ * The accepted attribution gate, pinned so later patches cannot weaken it
+ * silently. Changing it needs its own reviewed change to this table.
+ *
+ * History of this table:
+ *   - AVEN-010 patch 1 (commit 19bc92b7d789877dc3f760184d0889a9c2b8dc91)
+ *     pinned all three files.
+ *   - Codex audit remediation R3 (finding F3) DELIBERATELY re-pinned exactly
+ *     two of them, under explicit owner authorization, after the gate gained
+ *     the author/committer relationship rule (`author_committer_mismatch`):
+ *       attribution.ts       fd28bc4c7d0e56949563efb531896584d0e4ca04394d8e027f4c2853d609ffc8
+ *                         -> c188903c89e665c5db52d4d225f9ffbec5299fec6df0001b5c0d9a5b8e00cea8
+ *       attribution.test.ts  73d66888ac070653a946aa8ad795428d7b9452df51a54023f1c3d37265316142
+ *                         -> bce63089c0fad1a0a535f1d1a2ca155dc82bb616631acec8810e93dec1bedab8
+ *     `check-attribution.ts` is unchanged since patch 1. Nothing else in
+ *     this file (the 226 AVEN-009 pins, the authorized update set or the
+ *     authorized new paths) changed in R3.
  */
 const ACCEPTED_ATTRIBUTION_GATE: Record<string, string> = {
   'tooling/attribution/attribution.test.ts':
-    '73d66888ac070653a946aa8ad795428d7b9452df51a54023f1c3d37265316142',
+    'bce63089c0fad1a0a535f1d1a2ca155dc82bb616631acec8810e93dec1bedab8',
   'tooling/attribution/attribution.ts':
-    'fd28bc4c7d0e56949563efb531896584d0e4ca04394d8e027f4c2853d609ffc8',
+    'c188903c89e665c5db52d4d225f9ffbec5299fec6df0001b5c0d9a5b8e00cea8',
   'tooling/attribution/check-attribution.ts':
     'dc01f88b1cffbed66a222a8e7319ee2adfc8a42c68d3f6d16760f1ff00362e4b',
 };
+
+/** Pinned files whose bytes differ from `table`, read through `read`. */
+const gateDrift = (
+  table: Record<string, string>,
+  read: (file: string) => Buffer,
+): string[] =>
+  Object.entries(table)
+    .filter(
+      ([file, digest]) =>
+        createHash('sha256').update(read(file)).digest('hex') !== digest,
+    )
+    .map(([file]) => file);
+const readRepoFile = (file: string): Buffer =>
+  readFileSync(new URL(file, repoRoot));
+
+/**
+ * SHA-256 of the serialized 226-entry AVEN-009 table above (its exact
+ * entries, in order), recorded at R3 to show that the controlled gate re-pin
+ * left every original pin untouched.
+ */
+const FROZEN_TABLE_DIGEST =
+  '3ef554a25e15e9ded2daed7d6fee84d65386e6221aa0fd51492e67467af8eb5d';
 
 const sha256 = (relativePath: string): string =>
   createHash('sha256')
@@ -693,6 +728,7 @@ describe('AVEN-010 frozen layers (tooling tripwire, not runtime security)', () =
   it('keeps the accepted patch-1 attribution gate byte-identical and its script unchanged', () => {
     for (const [file, digest] of Object.entries(ACCEPTED_ATTRIBUTION_GATE))
       expect(sha256(file), file).toBe(digest);
+    expect(gateDrift(ACCEPTED_ATTRIBUTION_GATE, readRepoFile)).toEqual([]);
     expect(
       children('tooling/attribution')
         .map((e) => `tooling/attribution/${e.name}`)
@@ -704,6 +740,89 @@ describe('AVEN-010 frozen layers (tooling tripwire, not runtime security)', () =
     expect(root.scripts['attribution:check']).toBe(
       'node tooling/attribution/check-attribution.ts',
     );
+  });
+
+  it('R3: re-pins exactly the two authorized gate files, each to a full SHA-256 digest', () => {
+    expect(Object.keys(ACCEPTED_ATTRIBUTION_GATE).sort()).toEqual([
+      'tooling/attribution/attribution.test.ts',
+      'tooling/attribution/attribution.ts',
+      'tooling/attribution/check-attribution.ts',
+    ]);
+    for (const digest of Object.values(ACCEPTED_ATTRIBUTION_GATE))
+      expect(digest).toMatch(/^[a-f0-9]{64}$/);
+    // The patch-1 runner pin is untouched by R3.
+    expect(
+      ACCEPTED_ATTRIBUTION_GATE['tooling/attribution/check-attribution.ts'],
+    ).toBe('dc01f88b1cffbed66a222a8e7319ee2adfc8a42c68d3f6d16760f1ff00362e4b');
+    // The superseded patch-1 pins no longer match the gate's bytes.
+    expect(
+      gateDrift(
+        {
+          'tooling/attribution/attribution.ts':
+            'fd28bc4c7d0e56949563efb531896584d0e4ca04394d8e027f4c2853d609ffc8',
+          'tooling/attribution/attribution.test.ts':
+            '73d66888ac070653a946aa8ad795428d7b9452df51a54023f1c3d37265316142',
+        },
+        readRepoFile,
+      ),
+    ).toEqual([
+      'tooling/attribution/attribution.ts',
+      'tooling/attribution/attribution.test.ts',
+    ]);
+  });
+
+  it('R3: detects an unauthorized edit to any pinned gate file (simulated, nothing written)', () => {
+    for (const target of Object.keys(ACCEPTED_ATTRIBUTION_GATE)) {
+      const edits: ((bytes: Buffer) => Buffer)[] = [
+        (b) => Buffer.concat([b, Buffer.from('\n')]),
+        (b) => b.subarray(0, b.length - 1),
+        (b) => {
+          const copy = Buffer.from(b);
+          copy[Math.floor(copy.length / 2)]! ^= 1;
+          return copy;
+        },
+      ];
+      for (const edit of edits)
+        expect(
+          gateDrift(ACCEPTED_ATTRIBUTION_GATE, (file) =>
+            file === target ? edit(readRepoFile(file)) : readRepoFile(file),
+          ),
+          target,
+        ).toEqual([target]);
+    }
+  });
+
+  it('R3: stays active and detects a corrupted pin in the gate table', () => {
+    for (const [file, digest] of Object.entries(ACCEPTED_ATTRIBUTION_GATE)) {
+      const flipped = `${digest.slice(0, -1)}${digest.endsWith('0') ? '1' : '0'}`;
+      expect(
+        gateDrift(
+          { ...ACCEPTED_ATTRIBUTION_GATE, [file]: flipped },
+          readRepoFile,
+        ),
+        file,
+      ).toEqual([file]);
+    }
+    // A missing pinned file fails closed (the read throws).
+    expect(() =>
+      gateDrift(
+        { 'tooling/attribution/missing.ts': '0'.repeat(64) },
+        readRepoFile,
+      ),
+    ).toThrow();
+  });
+
+  it('R3: leaves the original 226 AVEN-009 pins and the authorized sets exactly as accepted', () => {
+    const table = createHash('sha256')
+      .update(JSON.stringify(Object.entries(FROZEN_AT_AVEN_009)))
+      .digest('hex');
+    expect(table).toBe(FROZEN_TABLE_DIGEST);
+    expect(AUTHORIZED_UPDATES).toHaveLength(5);
+    expect(AUTHORIZED_NEW_PATHS).toEqual([
+      'packages/corrections/',
+      'tooling/attribution/',
+      'docs/AVEN_010_REPORT.md',
+    ]);
   });
 
   it('pins the frozen layers AVEN-010 builds on and every earlier tripwire', () => {
