@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-010 correction events and immediate session overrides: package identity and fixed errors (root); ./ledger records one explicit owner correction through one frozen Ledger append. No resolver, context source, owner-state writer, learning or authority",
+  "description": "AVEN-010 correction events and immediate session overrides: package identity, fixed errors and the pure immediate-override resolver (root); ./ledger records one explicit owner correction through one frozen Ledger append and reads recorded correction history read-only. No context source, owner-state writer, learning or authority",
   "exports": {
     ".": "./src/index.ts",
     "./ledger": "./src/ledger/index.ts"

@@ -37,10 +37,17 @@ const all = Object.values(source).join('\n');
 
 const ledgerDir = new URL('../src/ledger/', import.meta.url);
 const ledgerEntries = readdirSync(ledgerDir, { withFileTypes: true });
-const ledgerSource = ledgerEntries
-  .filter((e) => e.isFile())
-  .map((e) => code(readFileSync(new URL(e.name, ledgerDir), 'utf8')))
-  .join('\n');
+const ledgerFile = (name: string) =>
+  code(readFileSync(new URL(name, ledgerDir), 'utf8'));
+/**
+ * Patch 5 splits the subpath's static rules per module: the recorder
+ * (`record.ts`) keeps its patch-3 rules unchanged, the read-only history
+ * module (`history.ts`) has its own stricter rules, and `index.ts` may only
+ * re-export them.
+ */
+const ledgerSource = ledgerFile('record.ts');
+const historySource = ledgerFile('history.ts');
+const ledgerIndexSource = ledgerFile('index.ts');
 
 /**
  * Exact named imports permitted per external module for the ROOT modules.
@@ -524,7 +531,7 @@ describe('AVEN-010 corrections static regression tripwires (not runtime security
       ledgerEntries
         .map((e) => `${e.isFile() ? 'file' : 'dir'}:${e.name}`)
         .sort(),
-    ).toEqual(['file:index.ts', 'file:record.ts']);
+    ).toEqual(['file:history.ts', 'file:index.ts', 'file:record.ts']);
   });
 
   it('imports only zod, allowlisted frozen contract names and its own modules', () => {
@@ -674,9 +681,9 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
 });
 
 /**
- * The `./ledger` subpath (patch 3): exact named imports per module. It is the
- * only place allowed to reach storage and the Ledger, the default clock
- * (`new Date()`) and the default identifier source (`randomUUID`).
+ * The `./ledger` recorder (patch 3): exact named imports per module. It is
+ * the only place allowed to write through the Ledger, and to use the default
+ * clock (`new Date()`) and the default identifier source (`randomUUID`).
  */
 const LEDGER_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   zod: new Set(['z']),
@@ -704,6 +711,21 @@ const LEDGER_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   '../config.ts': new Set(['AVEN_010_CORRECTIONS_VERSION']),
   '../errors.ts': new Set(['CorrectionError', 'CorrectionErrorCode']),
   '../inert.ts': new Set(['inertCopy']),
+};
+/** The read-only history module (patch 5): a strictly smaller surface. */
+const HISTORY_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
+  '@aven/contracts': new Set(['OwnerIdSchema']),
+  '@aven/ledger': new Set(['createLedger', 'LedgerError']),
+  '@aven/storage': new Set(['Storage']),
+  '../errors.ts': new Set(['CorrectionError', 'CorrectionErrorCode']),
+  '../resolve.ts': new Set([
+    'validateCorrectionHistory',
+    'CorrectionHistory',
+    'CorrectionHistoryEntry',
+  ]),
+};
+/** The subpath entry only re-exports its two modules. */
+const LEDGER_INDEX_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   './record.ts': new Set([
     'recordOwnerCorrection',
     'CorrectionIdPrefix',
@@ -711,15 +733,26 @@ const LEDGER_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'CorrectionRecordingOptions',
     'CorrectionSubmission',
   ]),
+  './history.ts': new Set([
+    'buildCorrectionEvidenceIndex',
+    'readCorrectionHistory',
+    'CorrectionEvidenceIndex',
+    'IndexedCorrection',
+    'IndexedEvidence',
+    'PersistedCorrectionHistory',
+  ]),
 };
 
-function ledgerImportViolations(text: string): string[] {
+function ledgerImportViolations(
+  text: string,
+  allowlist: Record<string, ReadonlySet<string>> = LEDGER_IMPORT_ALLOWLIST,
+): string[] {
   const found: string[] = [];
   for (const m of text.matchAll(
     /\b(?:import|export)\b\s*(?:type\s+)?(\{[^}]*\}|\*(?:\s+as\s+\w+)?|\w+)?\s*from\s+(['"])([^'"]+)\2/gs,
   )) {
     const module = m[3] ?? '';
-    const allowed = LEDGER_IMPORT_ALLOWLIST[module];
+    const allowed = allowlist[module];
     const clause = m[1] ?? '';
     if (!allowed || !clause.startsWith('{')) {
       found.push(module);
@@ -859,9 +892,18 @@ const LEDGER_KNOWN_BAD: Record<string, string[]> = {
 };
 
 describe('AVEN-010 corrections ledger subpath boundaries (patch 3; not runtime security)', () => {
-  it('exports exactly the recorder from the subpath, and nothing more', () => {
-    expect(Object.keys(ledgerApi)).toEqual(['recordOwnerCorrection']);
-    expect(typeof ledgerApi.recordOwnerCorrection).toBe('function');
+  it('exports exactly the recorder and the read-only history and index from the subpath, and nothing more', () => {
+    expect(Object.keys(ledgerApi).sort()).toEqual([
+      'buildCorrectionEvidenceIndex',
+      'readCorrectionHistory',
+      'recordOwnerCorrection',
+    ]);
+    for (const value of Object.values(ledgerApi))
+      expect(typeof value).toBe('function');
+    expect(Object.keys(publicApi)).not.toContain('readCorrectionHistory');
+    expect(Object.keys(publicApi)).not.toContain(
+      'buildCorrectionEvidenceIndex',
+    );
   });
 
   it('keeps the recorder out of the root entry', () => {
@@ -871,6 +913,34 @@ describe('AVEN-010 corrections ledger subpath boundaries (patch 3; not runtime s
 
   it('imports only allowlisted names, and the subpath only from itself or the root modules', () => {
     expect(ledgerImportViolations(ledgerSource)).toEqual([]);
+    expect(
+      ledgerImportViolations(historySource, HISTORY_IMPORT_ALLOWLIST),
+    ).toEqual([]);
+    expect(
+      ledgerImportViolations(ledgerIndexSource, LEDGER_INDEX_IMPORT_ALLOWLIST),
+    ).toEqual([]);
+    // The entry is re-exports only, and the recorder imports nothing from
+    // the history module (or the reverse).
+    expect(
+      ledgerIndexSource
+        .replace(/export\s*\{[^}]*\}\s*from\s*'\.\/(record|history)\.ts';/g, '')
+        .trim(),
+    ).toBe('');
+    expect(ledgerSource).not.toMatch(/history\.ts/);
+    expect(historySource).not.toMatch(/record\.ts/);
+    for (const bad of [
+      `import { recordOwnerCorrection } from './record.ts';`,
+      `import { randomUUID } from 'node:crypto';`,
+      `import { serializeContract } from '@aven/storage';`,
+      `import { EventInput } from '@aven/ledger';`,
+      `import { resolveImmediateCorrections } from '../resolve.ts';`,
+      `import { inertCopy } from '../inert.ts';`,
+      `import { createContextBroker } from '@aven/context-broker';`,
+    ])
+      expect(
+        ledgerImportViolations(bad, HISTORY_IMPORT_ALLOWLIST),
+        bad,
+      ).not.toEqual([]);
     for (const bad of [
       `import { openStorage } from '@aven/storage';`,
       `import { migrate } from '@aven/storage';`,
@@ -909,5 +979,127 @@ describe('AVEN-010 corrections ledger subpath boundaries (patch 3; not runtime s
       'SELECT 1 AS found FROM evidence WHERE owner_id = ? AND record_id = ? AND event_id = ?',
       "SELECT 1 AS found FROM record_versions WHERE owner_id = ? AND record_kind = 'owner_state' AND record_id = ? AND record_version = ?",
     ]);
+  });
+});
+
+/**
+ * The read-only history module (patch 5), under its OWN rules: one Ledger
+ * instance and one owner-correction replay, and nothing that writes, opens a
+ * transaction, issues SQL, reads a clock or randomness, records or builds
+ * correction events, filters by task or session, interprets corrections or
+ * touches authority. The recorder's rules above still apply to `record.ts`
+ * alone, unchanged.
+ */
+const HISTORY_RULES: Record<string, (text: string) => boolean> = {
+  'any Ledger write, or anything but one owner-correction replay': (t) =>
+    /\bappendEvent\b|\blistEvents\b|\bgetEvent\b|\binspectIntegrity\b/.test(
+      t,
+    ) ||
+    count(t, /\bcreateLedger\s*\(/) !== 1 ||
+    count(t, /\breplayEvents\s*\(/) !== 1 ||
+    [...t.matchAll(/eventType:\s*'([a-z_]+)'/g)].map((m) => m[1]).join(',') !==
+      'owner_correction',
+  'task, session or sequence pre-filtering of the replay': (t) =>
+    /\bsessionId\b|\btaskId\b|immediateApplicability|afterSequence|throughSequence|\blimit\s*:/.test(
+      t,
+    ),
+  'SQL, transactions, migrations or direct storage access': (t) =>
+    /\.sqlite\b|\.prepare\s*\(|\.(exec|run|transaction|pragma|iterate)\s*\(|\bmigrate\s*\(|openStorage|serializeContract|deserializeContract|\b(SELECT|INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|PRAGMA|ATTACH|VACUUM)\b/.test(
+      t,
+    ),
+  'a clock, randomness or identifier source': (t) =>
+    /new\s+Date\b|Date\.now|(?<![\w.])Date\s*\(|performance\.now|hrtime|randomUUID|\bcrypto\b|Math\.random|getRandomValues|randomBytes|randomInt/.test(
+      t,
+    ),
+  'correction recording or event construction': (t) =>
+    /recordOwnerCorrection|EventInput|EvidenceInput|OwnerCorrectionSchema|CorrectionTargetSchema|\breceipt\b|explicit_owner_correction/i.test(
+      t,
+    ),
+  'other Aven packages, the API, runtimes, Broker, Root or providers': (t) =>
+    LEDGER_RULES['other Aven packages, the API, runtimes or providers']!(t),
+  'network, files, processes, environment or timers': (t) =>
+    LEDGER_RULES['network, files, processes, environment or timers']!(t),
+  'owner-state writes, learning, promotion or correction interpretation': (t) =>
+    LEDGER_RULES[
+      'owner-state writes, learning, promotion or correction interpretation'
+    ]!(t),
+  'authority, approval, Root or tools': (t) =>
+    LEDGER_RULES['authority, approval, Root or tools']!(t) ||
+    /\bpermission\b/i.test(t),
+  'hidden reasoning fields': (t) => LEDGER_RULES['hidden reasoning fields']!(t),
+};
+
+const HISTORY_BASE = historySource;
+const HISTORY_KNOWN_BAD: Record<string, string[]> = {
+  'any Ledger write, or anything but one owner-correction replay': [
+    `${HISTORY_BASE}\nledger.appendEvent(event, { evidence });`,
+    `${HISTORY_BASE}\nconst page = ledger.listEvents({ eventType: 'owner_correction' });`,
+    `${HISTORY_BASE}\nconst second = createLedger(storage, otherOwner);`,
+    `${HISTORY_BASE}\nfor (const e of ledger.replayEvents()) use(e);`,
+    `${HISTORY_BASE}\nconst f = { eventType: 'owner_request' };`,
+    HISTORY_BASE.replace(/replayEvents\s*\(/, 'replay('),
+  ],
+  'task, session or sequence pre-filtering of the replay': [
+    `${HISTORY_BASE}\nledger.replay({ eventType: 'owner_correction', taskId });`,
+    `${HISTORY_BASE}\nconst f = { sessionId: binding.sessionId };`,
+    `${HISTORY_BASE}\nconst f = { throughSequence: 1000 };`,
+    `${HISTORY_BASE}\nconst f = { limit: 1000 };`,
+  ],
+  'SQL, transactions, migrations or direct storage access': [
+    `${HISTORY_BASE}\nstorage.sqlite.prepare('SELECT record_json FROM corrections WHERE owner_id = ?').all(owner);`,
+    `${HISTORY_BASE}\nconst q = 'INSERT INTO corrections(record_json) VALUES (?)';`,
+    `${HISTORY_BASE}\ndb.transaction(() => read())();`,
+    `${HISTORY_BASE}\nmigrate(storage.sqlite);`,
+    `${HISTORY_BASE}\nconst e = deserializeContract('experience_events', json);`,
+  ],
+  'a clock, randomness or identifier source': [
+    `${HISTORY_BASE}\nconst at = new Date();`,
+    `${HISTORY_BASE}\nconst t = Date.now();`,
+    `${HISTORY_BASE}\nconst id = randomUUID();`,
+    `${HISTORY_BASE}\nconst j = Math.random();`,
+  ],
+  'correction recording or event construction': [
+    `${HISTORY_BASE}\nrecordOwnerCorrection(storage, submission);`,
+    `${HISTORY_BASE}\nconst e: EventInput = build();`,
+    `${HISTORY_BASE}\nconst p = { kind: 'explicit_owner_correction' };`,
+  ],
+  'other Aven packages, the API, runtimes, Broker, Root or providers': [
+    `${HISTORY_BASE}\nimport { createContextBroker } from '@aven/context-broker';`,
+    `${HISTORY_BASE}\nimport { decide } from '@aven/root';`,
+    `${HISTORY_BASE}\nconst out = await runtime.invokeModel(prompt);`,
+  ],
+  'network, files, processes, environment or timers': [
+    `${HISTORY_BASE}\nawait fetch('https://example.invalid');`,
+    `${HISTORY_BASE}\nconst k = process.env.KEY;`,
+    `${HISTORY_BASE}\nsetTimeout(refresh, 1000);`,
+  ],
+  'owner-state writes, learning, promotion or correction interpretation': [
+    `${HISTORY_BASE}\nconst table = 'learned_owner_state';`,
+    `${HISTORY_BASE}\nconst view = resolveImmediateCorrections(h, q, o);`,
+    `${HISTORY_BASE}\nif (sameTarget) supersede(earlier);`,
+    `${HISTORY_BASE}\nconst p = inferPreference(history);`,
+  ],
+  'authority, approval, Root or tools': [
+    `${HISTORY_BASE}\nif (category === 'permission') allow();`,
+    `${HISTORY_BASE}\nreturn { decision: 'ALLOW' };`,
+    `${HISTORY_BASE}\nconst authorized = true;`,
+  ],
+  'hidden reasoning fields': [`${HISTORY_BASE}\nreturn { rationale: why };`],
+};
+
+describe('AVEN-010 corrections read-only history module boundaries (patch 5; not runtime security)', () => {
+  for (const [rule, violates] of Object.entries(HISTORY_RULES))
+    it(`has no ${rule}`, () => {
+      expect(violates(historySource), rule).toBe(false);
+      for (const bad of HISTORY_KNOWN_BAD[rule]!)
+        expect(violates(bad), bad.slice(HISTORY_BASE.length)).toBe(true);
+    });
+
+  it('keeps the recorder the only Ledger writer, with its own clock and identifier source', () => {
+    expect(count(ledgerSource, /\bappendEvent\s*\(/)).toBe(1);
+    expect(count(historySource, /\bappendEvent\b/)).toBe(0);
+    expect(count(ledgerSource, /new\s+Date\s*\(\s*\)/)).toBe(1);
+    expect(count(ledgerSource, /\brandomUUID\s*\(/)).toBe(1);
+    expect(historySource).not.toMatch(/new\s+Date|randomUUID/);
   });
 });

@@ -322,6 +322,24 @@ function validate(history: z.output<typeof HistorySchema>): Entry[] {
   return entries;
 }
 
+/** A validated correction entry, in Ledger sequence order. */
+export type ValidatedCorrectionEntry = Entry;
+
+/**
+ * AVEN-010 patch 5: the resolver's own whole-history parsing and consistency
+ * checks (exactly those `resolveImmediateCorrections` applies, unchanged),
+ * for the read-only correction-evidence index of `@aven/corrections/ledger`.
+ * Not a package export. Fails with the same fixed
+ * `invalid_correction_history`.
+ */
+export function validateCorrectionHistory(rawHistory: unknown): {
+  readonly ownerId: string;
+  readonly entries: readonly ValidatedCorrectionEntry[];
+} {
+  const history = parse(HistorySchema, rawHistory, HISTORY_LIMITS);
+  return { ownerId: history.ownerId, entries: validate(history) };
+}
+
 /** The longest sequence-ordered prefix inside the as-of boundary. */
 function asOf(
   entries: readonly Entry[],
