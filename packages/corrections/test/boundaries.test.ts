@@ -1142,6 +1142,8 @@ const CONTEXT_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'MAX_CANDIDATES_PER_SOURCE',
     'MAX_RAW_ITEMS_PER_SOURCE',
     'MAX_RAW_ITEMS_TOTAL',
+    // Patch 6 follow-up (N1): the public source-count limit.
+    'MAX_SOURCES',
     'MAX_TOTAL_CANDIDATES',
     'ContextBrokerError',
     'ContextCandidateSchema',
@@ -1195,13 +1197,25 @@ const CONTEXT_RULES: Record<string, (text: string) => boolean> = {
       t,
     ),
   'Broker internals, limits or ranking configuration': (t) =>
-    /RANKING_WEIGHTS|SCOPE_FACTORS|PROVENANCE_FACTORS|TRUST_FACTORS|FRESHNESS_|MAX_SELECTED|MAX_SINGLE_CONTEXT|MAX_CANDIDATE_TEXT|MAX_SOURCES|MAX_LABEL|MAX_METADATA|MAX_LOCAL_ID|MAX_REQUEST|SOURCE_COLLECTION_DEADLINE|NEGATIVE_SIGNAL|\bINTERNAL\b|CONTEXT_BROKER_CONFIG/.test(
+    /RANKING_WEIGHTS|SCOPE_FACTORS|PROVENANCE_FACTORS|TRUST_FACTORS|FRESHNESS_|MAX_SELECTED|MAX_SINGLE_CONTEXT|MAX_CANDIDATE_TEXT|MAX_LABEL|MAX_METADATA|MAX_LOCAL_ID|MAX_REQUEST|SOURCE_COLLECTION_DEADLINE|NEGATIVE_SIGNAL|\bINTERNAL\b|CONTEXT_BROKER_CONFIG/.test(
       t,
     ),
-  'altered or re-invented Broker raw and quota limits': (t) =>
-    /(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES)\s*[-+*/%]|[-+*/%]\s*(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES)\b|\b(10_?000|40_?000|500|2_?000)\b/.test(
-      t,
-    ),
+  // Only two expressions are allowed: `MAX_SOURCES - 1` (one slot reserved
+  // for the instruction source, exactly once) and the over-limit stand-in
+  // `MAX_RAW_ITEMS_PER_SOURCE + 1` (at most once). No other arithmetic on a
+  // limit and no literal re-statement of one.
+  'altered or re-invented Broker raw and quota limits': (t) => {
+    const rest = t
+      .replaceAll('MAX_SOURCES - 1', 'SOURCE_SLOTS')
+      .replaceAll('MAX_RAW_ITEMS_PER_SOURCE + 1', 'RAW_STAND_IN');
+    return (
+      count(t, /MAX_SOURCES - 1/) !== 1 ||
+      count(t, /MAX_RAW_ITEMS_PER_SOURCE \+ 1/) > 1 ||
+      /(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES|MAX_SOURCES)\s*[-+*/%]|[-+*/%]\s*(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES|MAX_SOURCES)\b|\b(10_?000|10_?001|40_?000|500|2_?000|15|16|17)\b/.test(
+        rest,
+      )
+    );
+  },
   'fixed instruction signals': (t) =>
     count(t, /confidence:\s*1,\s*salience:\s*1,\s*negativeRetrieval:\s*0/) !==
       1 ||
@@ -1255,6 +1269,9 @@ const CONTEXT_KNOWN_BAD: Record<string, string[]> = {
     `${CONTEXT_BASE}\nif (length > 10000) skip();`,
     `${CONTEXT_BASE}\nif (total > 40_000) skip();`,
     `${CONTEXT_BASE}\nif (owned > 500) skip();`,
+    `${CONTEXT_BASE}\nif (count > MAX_SOURCES - 2) refuse();`,
+    `${CONTEXT_BASE}\nif (count > 15) refuse();`,
+    CONTEXT_BASE.replace('MAX_SOURCES - 1', 'MAX_SOURCES'),
   ],
   'Broker internals, limits or ranking configuration': [
     `${CONTEXT_BASE}\nif (items.length > MAX_SELECTED_ITEMS) trim();`,

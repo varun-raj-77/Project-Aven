@@ -9,6 +9,7 @@ import {
   MAX_CANDIDATES_PER_SOURCE,
   MAX_RAW_ITEMS_PER_SOURCE,
   MAX_RAW_ITEMS_TOTAL,
+  MAX_SOURCES,
   MAX_TOTAL_CANDIDATES,
   type ContextBrokerErrorCode,
   type ContextBrokerTrace,
@@ -392,7 +393,16 @@ function suppressing(
         shared.rawTotal + shared.instructionCount > MAX_RAW_ITEMS_TOTAL
       ) {
         shared.owned.arrive();
-        return new Array<unknown>(length); // Never read: the Broker fails first.
+        // Never read: the Broker fails first. An over-limit length is
+        // untrusted and may not be a representable array length (Codex
+        // N2), so the stand-in is one item over the per-source limit, which
+        // the Broker rejects by itself; within-limit lengths are kept so the
+        // aggregate check sees the same total.
+        return new Array<unknown>(
+          length > MAX_RAW_ITEMS_PER_SOURCE
+            ? MAX_RAW_ITEMS_PER_SOURCE + 1
+            : length,
+        );
       }
       // 2. Ownership, one read per element, foreign records decided first.
       const items = value as readonly unknown[];
@@ -731,8 +741,16 @@ export async function assembleWithCorrections(
     try {
       if (!Array.isArray(rawSources))
         throw new ContextBrokerError('invalid_configuration');
+      // The Broker's source-count limit, with one slot reserved for the
+      // instruction source, before ANY source element or property is read
+      // (Codex N1).
       const count: unknown = (rawSources as unknown[]).length;
-      if (typeof count !== 'number' || !Number.isSafeInteger(count))
+      if (
+        typeof count !== 'number' ||
+        !Number.isSafeInteger(count) ||
+        count < 0 ||
+        count > MAX_SOURCES - 1
+      )
         throw new ContextBrokerError('invalid_configuration');
       const read: ReturnType<typeof readSource>[] = [];
       for (let i = 0; i < count; i += 1)

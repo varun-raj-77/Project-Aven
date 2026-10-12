@@ -1604,3 +1604,226 @@ describe('Patch 6 remediation: exact identity and error vocabulary, directly', (
     expect(getterCalls).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Patch 6 follow-up: Codex findings N1 (source-count limit before any source
+// property read) and N2 (huge logical collection lengths). Synthetic data.
+// ---------------------------------------------------------------------------
+
+/** The instruction source's slot, registered in the direct-Broker baseline. */
+const instructionSlot = (): ContextSource =>
+  Object.freeze({
+    sourceId: INSTRUCTION_SOURCE,
+    kind: 'active_task' as const,
+    collect: () => [],
+  });
+
+/** `n` base sources whose registration fields are counting getters. */
+function countedSources(n: number, reads: { count: number }): ContextSource[] {
+  return Array.from({ length: n }, (_, i) => {
+    const s = {};
+    for (const [key, value] of [
+      ['sourceId', `episodes-${i}`],
+      ['kind', 'episode_history'],
+      ['collect', () => []],
+    ] as const)
+      Object.defineProperty(s, key, {
+        enumerable: true,
+        get() {
+          reads.count += 1;
+          return value;
+        },
+      });
+    return s as ContextSource;
+  });
+}
+
+describe('Patch 6 follow-up N1: the source-count limit is checked before any source is read', () => {
+  it('accepts up to 15 base sources and refuses more without reading a single source property', async () => {
+    const observed: Record<number, [string, number, string, number]> = {};
+    for (const n of [0, 1, 15, 16, 17, 100, 1000]) {
+      const wrapped = { count: 0 };
+      const plain = { count: 0 };
+      const outcome = await assemble(targeted(), countedSources(n, wrapped));
+      const baseline = await direct([
+        ...countedSources(n, plain),
+        instructionSlot(),
+      ]);
+      const code =
+        outcome.status === 'exposed' ? 'exposed' : outcome.brokerErrorCode!;
+      observed[n] = [
+        code,
+        wrapped.count,
+        baseline.ok ? 'ok' : baseline.code,
+        plain.count,
+      ];
+    }
+    expect(observed).toEqual({
+      0: ['exposed', 0, 'ok', 0],
+      1: ['exposed', 3, 'ok', 3],
+      15: ['exposed', 45, 'ok', 45],
+      16: ['invalid_configuration', 0, 'invalid_configuration', 0],
+      17: ['invalid_configuration', 0, 'invalid_configuration', 0],
+      100: ['invalid_configuration', 0, 'invalid_configuration', 0],
+      1000: ['invalid_configuration', 0, 'invalid_configuration', 0],
+    });
+  });
+
+  it('refuses a huge, throwing or revoked source list before indexing any source', async () => {
+    let indexed = 0;
+    const huge = new Proxy([] as ContextSource[], {
+      get(target, key, receiver) {
+        if (key === 'length') return Number.MAX_SAFE_INTEGER;
+        if (typeof key === 'string' && /^\d+$/.test(key)) indexed += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const throwing = new Proxy([] as ContextSource[], {
+      get(target, key, receiver) {
+        if (key === 'length') throw new Error('Synthetic secret length');
+        if (typeof key === 'string' && /^\d+$/.test(key)) indexed += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const { proxy: revoked, revoke } = Proxy.revocable(
+      [] as ContextSource[],
+      {},
+    );
+    revoke();
+    for (const sources of [huge, throwing, revoked]) {
+      for (const h of [history(), targeted()]) {
+        const failed = notExposed(await assemble(h, sources));
+        expect(failed.reason).toBe('assembly_failed');
+        expect(failed.brokerErrorCode).toBe('invalid_configuration');
+        expect(text(failed)).not.toContain('secret');
+      }
+    }
+    expect(indexed).toBe(0);
+  });
+});
+
+describe('Patch 6 follow-up N2: huge logical lengths are the Broker resource-limit error', () => {
+  /** A collection that reports `length` without holding any element. */
+  const logical = (length: number, reads: { elements: number }) =>
+    new Proxy([] as unknown[], {
+      get(target, key, receiver) {
+        if (key === 'length') return length;
+        if (typeof key === 'string' && /^\d+$/.test(key)) {
+          reads.elements += 1;
+          return undefined;
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
+  it(
+    'classifies every over-limit length exactly as the Broker does, reading no element',
+    { timeout: 120_000 },
+    async () => {
+      const observed: Record<string, [string, number, string, number]> = {};
+      for (const n of [
+        10000,
+        10001,
+        20000,
+        2 ** 32 - 1,
+        2 ** 32,
+        Number.MAX_SAFE_INTEGER,
+      ]) {
+        const wrapped = { elements: 0 };
+        const plain = { elements: 0 };
+        const outcome = await assemble(targeted(), [
+          source('episodes', 'episode_history', logical(n, wrapped)),
+        ]);
+        const baseline = await direct([
+          source('episodes', 'episode_history', logical(n, plain)),
+        ]);
+        const code =
+          outcome.status === 'exposed' ? 'exposed' : outcome.brokerErrorCode!;
+        observed[String(n)] = [
+          code,
+          wrapped.elements,
+          baseline.ok ? 'ok' : baseline.code,
+          plain.elements,
+        ];
+      }
+      expect(observed).toEqual({
+        // Within the raw limit both read every (undefined) element, and the
+        // 10000 non-foreign items exceed the owner quota.
+        '10000': [
+          'candidate_limit_exceeded',
+          10000,
+          'candidate_limit_exceeded',
+          10000,
+        ],
+        '10001': [
+          'source_resource_limit_exceeded',
+          0,
+          'source_resource_limit_exceeded',
+          0,
+        ],
+        '20000': [
+          'source_resource_limit_exceeded',
+          0,
+          'source_resource_limit_exceeded',
+          0,
+        ],
+        '4294967295': [
+          'source_resource_limit_exceeded',
+          0,
+          'source_resource_limit_exceeded',
+          0,
+        ],
+        '4294967296': [
+          'source_resource_limit_exceeded',
+          0,
+          'source_resource_limit_exceeded',
+          0,
+        ],
+        '9007199254740991': [
+          'source_resource_limit_exceeded',
+          0,
+          'source_resource_limit_exceeded',
+          0,
+        ],
+      });
+    },
+  );
+
+  it('still classifies an over-limit source beside a sibling within the limit', async () => {
+    const wrapped = { elements: 0 };
+    const outcome = notExposed(
+      await assemble(targeted(), [
+        source('episodes', 'episode_history', logical(2 ** 32, wrapped)),
+        source('state', 'owner_state', [stateCandidate('pref', 1)]),
+      ]),
+    );
+    expect(outcome.brokerErrorCode).toBe('source_resource_limit_exceeded');
+    expect(wrapped.elements).toBe(0);
+  });
+});
+
+describe('Patch 6 follow-up: a failing source releases the coordination of its siblings', () => {
+  it(
+    'reports the failing source, not a timeout of a waiting sibling',
+    { timeout: 30_000 },
+    async () => {
+      const failing: ContextSource[] = [
+        Object.freeze({
+          sourceId: 'z-failing',
+          kind: 'episode_history' as const,
+          collect: () => Promise.reject(new Error('Synthetic failure')),
+        }),
+        source('z-failing', 'episode_history', 'not an array' as never),
+      ];
+      for (const bad of failing) {
+        const healthy = source('a-healthy', 'episode_history', [
+          evidenceCandidate('a'),
+        ]);
+        const outcome = notExposed(await assemble(targeted(), [healthy, bad]));
+        // Without the release the healthy source would wait for the Broker's
+        // deadline and be reported first as source_timeout.
+        expect(outcome.brokerErrorCode).toBe('source_failure');
+      }
+    },
+  );
+});
