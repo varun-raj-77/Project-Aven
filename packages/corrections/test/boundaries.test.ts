@@ -1133,7 +1133,16 @@ describe('AVEN-010 corrections read-only history module boundaries (patch 5; not
  */
 const CONTEXT_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   'node:crypto': new Set(['createHash']),
+  '@aven/contracts': new Set(['OwnerIdSchema']),
   '@aven/context-broker': new Set([
+    // Patch 6 remediation (F3, F4): the Broker's PUBLIC error vocabulary and
+    // its public raw and owner-quota limits, mirrored in the wrapper's
+    // preprocessing order. Weights, budgets and internals stay forbidden.
+    'CONTEXT_BROKER_ERROR_CODES',
+    'MAX_CANDIDATES_PER_SOURCE',
+    'MAX_RAW_ITEMS_PER_SOURCE',
+    'MAX_RAW_ITEMS_TOTAL',
+    'MAX_TOTAL_CANDIDATES',
     'ContextBrokerError',
     'ContextCandidateSchema',
     'ContextRequestSchema',
@@ -1186,7 +1195,11 @@ const CONTEXT_RULES: Record<string, (text: string) => boolean> = {
       t,
     ),
   'Broker internals, limits or ranking configuration': (t) =>
-    /RANKING_WEIGHTS|SCOPE_FACTORS|PROVENANCE_FACTORS|TRUST_FACTORS|FRESHNESS_|MAX_SELECTED|MAX_SINGLE_CONTEXT|MAX_CANDIDATE|MAX_RAW|MAX_SOURCES|SOURCE_COLLECTION_DEADLINE|NEGATIVE_SIGNAL|\bINTERNAL\b|CONTEXT_BROKER_CONFIG/.test(
+    /RANKING_WEIGHTS|SCOPE_FACTORS|PROVENANCE_FACTORS|TRUST_FACTORS|FRESHNESS_|MAX_SELECTED|MAX_SINGLE_CONTEXT|MAX_CANDIDATE_TEXT|MAX_SOURCES|MAX_LABEL|MAX_METADATA|MAX_LOCAL_ID|MAX_REQUEST|SOURCE_COLLECTION_DEADLINE|NEGATIVE_SIGNAL|\bINTERNAL\b|CONTEXT_BROKER_CONFIG/.test(
+      t,
+    ),
+  'altered or re-invented Broker raw and quota limits': (t) =>
+    /(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES)\s*[-+*/%]|[-+*/%]\s*(MAX_RAW_ITEMS_PER_SOURCE|MAX_RAW_ITEMS_TOTAL|MAX_CANDIDATES_PER_SOURCE|MAX_TOTAL_CANDIDATES)\b|\b(10_?000|40_?000|500|2_?000)\b/.test(
       t,
     ),
   'fixed instruction signals': (t) =>
@@ -1236,8 +1249,16 @@ const CONTEXT_KNOWN_BAD: Record<string, string[]> = {
     `${CONTEXT_BASE}\nconst id = randomUUID();`,
     `${CONTEXT_BASE}\nconst j = Math.random();`,
   ],
+  'altered or re-invented Broker raw and quota limits': [
+    `${CONTEXT_BASE}\nif (length > MAX_RAW_ITEMS_PER_SOURCE + 1) skip();`,
+    `${CONTEXT_BASE}\nconst limit = 2 * MAX_TOTAL_CANDIDATES;`,
+    `${CONTEXT_BASE}\nif (length > 10000) skip();`,
+    `${CONTEXT_BASE}\nif (total > 40_000) skip();`,
+    `${CONTEXT_BASE}\nif (owned > 500) skip();`,
+  ],
   'Broker internals, limits or ranking configuration': [
     `${CONTEXT_BASE}\nif (items.length > MAX_SELECTED_ITEMS) trim();`,
+    `${CONTEXT_BASE}\nif (text.length > MAX_CANDIDATE_TEXT_CHARS) cut();`,
     `${CONTEXT_BASE}\nconst w = RANKING_WEIGHTS_BASIS_POINTS.relevance;`,
     `${CONTEXT_BASE}\nINTERNAL.candidate.parse(x);`,
   ],

@@ -1,9 +1,15 @@
 import { createHash } from 'node:crypto';
+import { OwnerIdSchema } from '@aven/contracts';
 import {
+  CONTEXT_BROKER_ERROR_CODES,
   ContextBrokerError,
   ContextCandidateSchema,
   ContextRequestSchema,
   createContextBroker,
+  MAX_CANDIDATES_PER_SOURCE,
+  MAX_RAW_ITEMS_PER_SOURCE,
+  MAX_RAW_ITEMS_TOTAL,
+  MAX_TOTAL_CANDIDATES,
   type ContextBrokerErrorCode,
   type ContextBrokerTrace,
   type ContextBundle,
@@ -153,88 +159,310 @@ function suppressionKeys(view: ImmediateCorrectionView): ReadonlySet<string> {
   return keys;
 }
 
-/** The key of a candidate snapshot's reference, if it is comparable. */
-function referenceKey(snapshot: unknown): string | undefined {
-  if (snapshot === null || typeof snapshot !== 'object') return undefined;
-  const reference = (snapshot as { reference?: unknown }).reference;
-  if (reference === null || typeof reference !== 'object') return undefined;
-  const r = reference as {
-    kind?: unknown;
-    reference?: {
-      evidenceId?: unknown;
-      eventId?: unknown;
-      learnedItemId?: unknown;
-      version?: unknown;
-    };
-  };
-  const inner = r.reference;
-  if (inner === null || typeof inner !== 'object') return undefined;
-  if (
-    r.kind === 'evidence' &&
-    typeof inner.evidenceId === 'string' &&
-    typeof inner.eventId === 'string'
-  )
-    return evidenceKey(inner.evidenceId, inner.eventId);
-  if (
-    r.kind === 'owner_state' &&
-    typeof inner.learnedItemId === 'string' &&
-    typeof inner.version === 'number'
-  )
-    return ownerStateKey(inner.learnedItemId, inner.version);
+/** The key of a VALIDATED candidate's reference, if it is comparable. */
+function referenceKey(
+  reference: ContextCandidate['reference'],
+): string | undefined {
+  if (reference.kind === 'evidence')
+    return evidenceKey(
+      reference.reference.evidenceId,
+      reference.reference.eventId,
+    );
+  if (reference.kind === 'owner_state')
+    return ownerStateKey(
+      reference.reference.learnedItemId,
+      reference.reference.version,
+    );
   return undefined;
 }
 
 /**
- * Wraps one base source: same ID, kind and query; only exactly targeted
- * same-owner candidates are replaced by a copy with the suppression signal.
- * Foreign, non-matching, unreadable or invalid items pass through untouched
- * (the Broker drops, keeps or rejects them as before); source failures and
- * timeouts propagate.
+ * Per-assembly coordination of the wrapped base sources (Codex audit F4).
+ * The frozen Broker checks every source's RAW length, then the aggregate raw
+ * length, then drops foreign records, then checks owner quotas, and only then
+ * clones and validates. Wrapped sources run inside its collection step, so
+ * they wait for one another at two barriers and read no element until every
+ * source has reported its raw length within the Broker's public raw limits,
+ * and clone nothing until every owner count is within its public quotas.
+ * Otherwise they hand the Broker inert, same-length placeholders and it
+ * reports its own fixed limit error. A failed or aborted sibling (the
+ * Broker's deadline aborts its signal) releases every barrier: that
+ * assembly fails in the Broker regardless.
+ */
+interface Coordination {
+  readonly instructionCount: number;
+  failed: boolean;
+  rawTotal: number;
+  rawExceeded: boolean;
+  ownedTotal: number;
+  quotaExceeded: boolean;
+  readonly raw: Barrier;
+  readonly owned: Barrier;
+  aborts: boolean;
+}
+
+interface Barrier {
+  arrive(): Promise<void>;
+  open(): void;
+}
+
+function barrier(parties: number): Barrier {
+  let remaining = parties;
+  let release: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  if (remaining <= 0) release();
+  return {
+    arrive() {
+      remaining -= 1;
+      if (remaining <= 0) release();
+      return ready;
+    },
+    open: () => release(),
+  };
+}
+
+function coordination(parties: number, instructionCount: number): Coordination {
+  return {
+    instructionCount,
+    failed: false,
+    rawTotal: 0,
+    rawExceeded: false,
+    ownedTotal: 0,
+    quotaExceeded: false,
+    raw: barrier(parties),
+    owned: barrier(parties),
+    aborts: false,
+  };
+}
+
+/** An inert stand-in the Broker drops as foreign (it reads only `ownerId`). */
+const foreignPlaceholder = (ownerId: string) => Object.freeze({ ownerId });
+/** An inert stand-in the Broker counts and then rejects as invalid. */
+const INVALID_PLACEHOLDER = Object.freeze({});
+
+type Classified =
+  | { readonly kind: 'foreign'; readonly ownerId: string }
+  | { readonly kind: 'invalid' }
+  | { readonly kind: 'primitive'; readonly value: unknown }
+  | {
+      readonly kind: 'owned' | 'unrecognized';
+      readonly item: object;
+    };
+
+/**
+ * Exactly the Broker's ownership read: one `Reflect.get` of `ownerId`, and a
+ * recognizable foreign owner is decided on that single read. Nothing else of
+ * a foreign record is ever read.
+ */
+function classify(
+  value: readonly unknown[],
+  index: number,
+  requester: string,
+): Classified {
+  let item: unknown;
+  let owner: unknown;
+  try {
+    item = value[index];
+    if (item === null || typeof item !== 'object')
+      return { kind: 'primitive', value: item };
+    owner = Reflect.get(item, 'ownerId');
+  } catch {
+    return { kind: 'invalid' };
+  }
+  if (
+    typeof owner === 'string' &&
+    owner !== requester &&
+    OwnerIdSchema.safeParse(owner).success
+  )
+    return { kind: 'foreign', ownerId: owner };
+  return {
+    kind: owner === requester ? 'owned' : 'unrecognized',
+    item: item as object,
+  };
+}
+
+/**
+ * One snapshot of a non-foreign item, consistent with its ownership read;
+ * any inconsistency or unreadable data fails closed in the Broker. A
+ * same-owner snapshot that is a VALID candidate whose reference exactly
+ * equals an active target becomes a copy with the suppression value; every
+ * other snapshot is handed over unchanged, so the Broker validates (and
+ * rejects) exactly what it would have read itself.
+ */
+function settle(
+  entry: Extract<Classified, { kind: 'owned' | 'unrecognized' }>,
+  requester: string,
+  keys: ReadonlySet<string>,
+): unknown {
+  let snapshot: unknown;
+  try {
+    snapshot = structuredClone(entry.item);
+  } catch {
+    return INVALID_PLACEHOLDER;
+  }
+  if (snapshot === null || typeof snapshot !== 'object')
+    return INVALID_PLACEHOLDER;
+  const owner = (snapshot as { ownerId?: unknown }).ownerId;
+  if (entry.kind === 'owned' && owner !== requester) return INVALID_PLACEHOLDER;
+  if (
+    entry.kind === 'unrecognized' &&
+    typeof owner === 'string' &&
+    owner !== requester &&
+    OwnerIdSchema.safeParse(owner).success
+  )
+    return INVALID_PLACEHOLDER;
+  if (owner !== requester) return snapshot;
+  const parsed = ContextCandidateSchema.safeParse(snapshot);
+  if (!parsed.success) return snapshot;
+  const key = referenceKey(parsed.data.reference);
+  if (key === undefined || !keys.has(key)) return snapshot;
+  return {
+    ...(snapshot as object),
+    signals: {
+      ...(snapshot as { signals: object }).signals,
+      negativeRetrieval: SUPPRESSION_VALUE,
+    },
+  };
+}
+
+/**
+ * Wraps one base source: same ID, kind, query and abort signal. With no
+ * active exact target it is a pure pass-through that reads nothing. Source
+ * failures and timeouts propagate; malformed output is handed to the Broker
+ * to reject with its own fixed codes.
  */
 function suppressing(
-  base: ContextSource,
+  base: {
+    readonly sourceId: unknown;
+    readonly kind: unknown;
+    readonly collect: unknown;
+    readonly target: object;
+  },
   keys: ReadonlySet<string>,
+  shared: Coordination,
 ): ContextSource {
-  const sourceId = base.sourceId;
-  const kind = base.kind;
-  const collect: unknown = base.collect;
-  if (typeof collect !== 'function')
-    throw new ContextBrokerError('invalid_configuration');
+  const collect = base.collect as ContextSource['collect'];
   return Object.freeze({
-    sourceId,
-    kind,
+    sourceId: base.sourceId as string,
+    kind: base.kind as ContextSource['kind'],
     async collect(
       query: ContextSourceQuery,
       options: ContextSourceCollectOptions,
     ): Promise<readonly unknown[]> {
-      const items: unknown = await (collect as ContextSource['collect']).call(
-        base,
-        query,
-        options,
-      );
-      if (keys.size === 0 || !Array.isArray(items))
-        return items as readonly unknown[];
-      return items.map((item: unknown) => {
-        if (item === null || typeof item !== 'object') return item;
-        let snapshot: unknown;
-        try {
-          if ((item as { ownerId?: unknown }).ownerId !== query.ownerId)
-            return item;
-          snapshot = structuredClone(item);
-        } catch {
-          return item;
+      if (keys.size === 0) return collect.call(base.target, query, options);
+      const release = () => {
+        shared.failed = true;
+        shared.raw.open();
+        shared.owned.open();
+      };
+      if (!shared.aborts) {
+        shared.aborts = true;
+        options.signal.addEventListener('abort', release, { once: true });
+      }
+      let value: unknown;
+      try {
+        value = await collect.call(base.target, query, options);
+      } catch (error) {
+        release();
+        throw error;
+      }
+      // 1. The raw length, read once, before any element.
+      let length: number | undefined;
+      try {
+        if (Array.isArray(value)) {
+          const n: unknown = (value as unknown[]).length;
+          if (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0)
+            length = n;
         }
-        const key = referenceKey(snapshot);
-        if (key === undefined || !keys.has(key)) return item;
-        const signals = (snapshot as { signals?: unknown }).signals;
-        if (signals === null || typeof signals !== 'object') return item;
-        return {
-          ...(snapshot as object),
-          signals: { ...signals, negativeRetrieval: SUPPRESSION_VALUE },
-        };
+      } catch {
+        length = undefined;
+      }
+      if (length === undefined) {
+        release();
+        return undefined as never; // The Broker reports source_failure.
+      }
+      if (length > MAX_RAW_ITEMS_PER_SOURCE) shared.rawExceeded = true;
+      shared.rawTotal += length;
+      await shared.raw.arrive();
+      if (
+        shared.failed ||
+        shared.rawExceeded ||
+        shared.rawTotal + shared.instructionCount > MAX_RAW_ITEMS_TOTAL
+      ) {
+        shared.owned.arrive();
+        return new Array<unknown>(length); // Never read: the Broker fails first.
+      }
+      // 2. Ownership, one read per element, foreign records decided first.
+      const items = value as readonly unknown[];
+      const classified: Classified[] = [];
+      for (let i = 0; i < length; i += 1)
+        classified.push(classify(items, i, query.ownerId));
+      const owned = classified.filter((c) => c.kind !== 'foreign').length;
+      if (owned > MAX_CANDIDATES_PER_SOURCE) shared.quotaExceeded = true;
+      shared.ownedTotal += owned;
+      await shared.owned.arrive();
+      const overQuota =
+        shared.failed ||
+        shared.quotaExceeded ||
+        shared.ownedTotal + shared.instructionCount > MAX_TOTAL_CANDIDATES;
+      // 3. Snapshots only within every quota; foreign records stay inert.
+      return classified.map((c) => {
+        switch (c.kind) {
+          case 'foreign':
+            return foreignPlaceholder(c.ownerId);
+          case 'invalid':
+            return INVALID_PLACEHOLDER;
+          case 'primitive':
+            return c.value;
+          default:
+            return overQuota
+              ? INVALID_PLACEHOLDER
+              : settle(c, query.ownerId, keys);
+        }
       });
     },
   });
+}
+
+/** Reads one base source's registration fields exactly once. */
+function readSource(source: unknown) {
+  if (source === null || typeof source !== 'object')
+    throw new ContextBrokerError('invalid_configuration');
+  const collect: unknown = Reflect.get(source, 'collect');
+  const read = {
+    sourceId: Reflect.get(source, 'sourceId') as unknown,
+    kind: Reflect.get(source, 'kind') as unknown,
+    collect,
+    target: source,
+  };
+  if (typeof read.collect !== 'function')
+    throw new ContextBrokerError('invalid_configuration');
+  return read;
+}
+
+/**
+ * A fixed Broker error code, or null (Codex audit F3): only a code from the
+ * Broker's declared vocabulary, read as an own data property without running
+ * any getter, is ever reported. Exported for this package's own tests only;
+ * not a subpath export.
+ */
+export function brokerCode(error: unknown): ContextBrokerErrorCode | null {
+  try {
+    if (!(error instanceof ContextBrokerError)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+    const code: unknown =
+      descriptor !== undefined && 'value' in descriptor
+        ? descriptor.value
+        : undefined;
+    return typeof code === 'string' &&
+      (CONTEXT_BROKER_ERROR_CODES as readonly string[]).includes(code)
+      ? (code as ContextBrokerErrorCode)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function candidateIdOf(
@@ -496,27 +724,36 @@ export async function assembleWithCorrections(
       },
     });
 
+    // Wrapper preparation (Codex audit F3): every base source is read here,
+    // once, outside the Broker; ANY throw is the fixed invalid_configuration
+    // the Broker itself reports for an unreadable source.
+    let wrapped: ContextSource[];
+    try {
+      if (!Array.isArray(rawSources))
+        throw new ContextBrokerError('invalid_configuration');
+      const count: unknown = (rawSources as unknown[]).length;
+      if (typeof count !== 'number' || !Number.isSafeInteger(count))
+        throw new ContextBrokerError('invalid_configuration');
+      const read: ReturnType<typeof readSource>[] = [];
+      for (let i = 0; i < count; i += 1)
+        read.push(readSource((rawSources as unknown[])[i]));
+      const keys = suppressionKeys(view);
+      const shared = coordination(read.length, required.length);
+      wrapped = read.map((source) => suppressing(source, keys, shared));
+    } catch {
+      return notExposed('assembly_failed', [], null, 'invalid_configuration');
+    }
+
     let assembly: Awaited<
       ReturnType<ReturnType<typeof createContextBroker>['assemble']>
     >;
     try {
-      if (!Array.isArray(rawSources))
-        throw new ContextBrokerError('invalid_configuration');
-      const keys = suppressionKeys(view);
-      const wrapped = (rawSources as readonly ContextSource[]).map((source) =>
-        suppressing(source, keys),
-      );
       const broker = createContextBroker({
         sources: [...wrapped, instructionSource],
       });
       assembly = await broker.assemble(request);
     } catch (error) {
-      return notExposed(
-        'assembly_failed',
-        [],
-        null,
-        error instanceof ContextBrokerError ? error.code : null,
-      );
+      return notExposed('assembly_failed', [], null, brokerCode(error));
     }
 
     const verdict = verifyExposure(required, assembly, {

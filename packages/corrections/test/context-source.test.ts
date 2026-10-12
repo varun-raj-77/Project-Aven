@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CONTEXT_BROKER_ERROR_CODES,
+  ContextBrokerError,
   createContextBroker,
   type ContextCandidate,
   type ContextRequest,
@@ -16,6 +18,7 @@ import {
   type CorrectionAssemblyOutcome,
 } from '../src/context-source/index.ts';
 import {
+  brokerCode,
   verifyExposure,
   type RequiredInstruction,
 } from '../src/context-source/integration.ts';
@@ -977,5 +980,627 @@ describe('verifyExposure: altered selected bundles are never exposed', () => {
     ];
     for (const [label, edit, reason] of cases)
       expect(verify(edit), label).toBe(reason);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Patch 6 remediation: Codex findings F1-F4 on the wrapper's trust boundary.
+// Every case compares the correction wrapper with the DIRECT frozen Broker on
+// the same base sources. Owners, IDs and texts are synthetic.
+// ---------------------------------------------------------------------------
+
+const FOREIGN = 'owner_foreign';
+/** A history with one active exact evidence target, so base sources are wrapped. */
+const targeted = () => history(spec(1, { target: toEvidence('t') }));
+
+type DirectResult =
+  | { readonly ok: true; readonly bundle: unknown; readonly trace: unknown }
+  | { readonly ok: false; readonly code: string };
+async function direct(
+  sources: readonly ContextSource[],
+): Promise<DirectResult> {
+  try {
+    const a = await createContextBroker({ sources }).assemble(request());
+    return { ok: true, bundle: a.bundle, trace: a.trace };
+  } catch (error) {
+    return { ok: false, code: (error as ContextBrokerError).code };
+  }
+}
+
+interface Reads {
+  owner: number;
+  other: number;
+}
+/** A candidate whose every field is a counting getter; ownerId follows `owners`. */
+function hostile(owners: readonly string[], reads: Reads, n = 'h'): object {
+  const base = evidenceCandidate(n, `Synthetic hostile note ${ASK}`);
+  const item = {};
+  for (const [key, value] of Object.entries(base))
+    if (key !== 'ownerId')
+      Object.defineProperty(item, key, {
+        enumerable: true,
+        get() {
+          reads.other += 1;
+          return value;
+        },
+      });
+  let i = 0;
+  Object.defineProperty(item, 'ownerId', {
+    enumerable: true,
+    get() {
+      reads.owner += 1;
+      const owner = owners[Math.min(i, owners.length - 1)]!;
+      i += 1;
+      return owner;
+    },
+  });
+  return item;
+}
+
+const fresh = (): Reads => ({ owner: 0, other: 0 });
+const text = (o: unknown) => JSON.stringify(o);
+
+describe('Patch 6 remediation F1: foreign-first owner isolation is preserved', () => {
+  const run = async (owners: readonly string[]) => {
+    const wrapped = fresh();
+    const plain = fresh();
+    const outcome = await assemble(targeted(), [
+      source('episodes', 'episode_history', [
+        evidenceCandidate('t'),
+        hostile(owners, wrapped),
+      ]),
+    ]);
+    const baseline = await direct([
+      source('episodes', 'episode_history', [
+        evidenceCandidate('t'),
+        hostile(owners, plain),
+      ]),
+    ]);
+    return { outcome, baseline, wrapped, plain };
+  };
+
+  it('drops an initially foreign item even if a later read claims the requester, reading nothing else', async () => {
+    for (const owners of [
+      [FOREIGN, OWNER],
+      [FOREIGN, FOREIGN],
+    ]) {
+      const { outcome, baseline, wrapped, plain } = await run(owners);
+      const ok = exposed(outcome);
+      expect(baseline.ok).toBe(true);
+      // The foreign item never reaches the bundle, trace or anything else.
+      expect(text(ok)).not.toContain('base-evidence-h');
+      expect(text(ok)).not.toContain('Synthetic hostile');
+      expect(text(ok)).not.toContain(FOREIGN);
+      // Exactly one ownership read, as the direct Broker does; no other
+      // field of a foreign item is ever read.
+      expect(wrapped).toEqual({ owner: 1, other: 0 });
+      expect(plain).toEqual({ owner: 1, other: 0 });
+    }
+  });
+
+  it('fails closed when an initially requester-owned item later claims a foreign owner, like the Broker', async () => {
+    const { outcome, baseline } = await run([OWNER, FOREIGN]);
+    const failed = notExposed(outcome);
+    expect(baseline).toEqual({ ok: false, code: 'invalid_candidate' });
+    expect(failed.reason).toBe('assembly_failed');
+    expect(failed.brokerErrorCode).toBe('invalid_candidate');
+    expect(text(failed)).not.toContain(FOREIGN);
+  });
+
+  it('reads a consistent requester-owned item no more often than the Broker does', async () => {
+    const { outcome, wrapped, plain } = await run([OWNER, OWNER]);
+    const ok = exposed(outcome);
+    expect(traceOf(ok, 'base-evidence-h').selection).toBe('selected');
+    expect(wrapped.owner).toBe(plain.owner);
+    expect(wrapped.other).toBe(plain.other);
+  });
+
+  it('fails closed on a throwing ownership getter without reading other fields', async () => {
+    const reads = fresh();
+    const item = {};
+    Object.defineProperty(item, 'ownerId', {
+      enumerable: true,
+      get() {
+        reads.owner += 1;
+        throw new Error('Synthetic secret getter failure');
+      },
+    });
+    Object.defineProperty(item, 'text', {
+      enumerable: true,
+      get() {
+        reads.other += 1;
+        return 'never';
+      },
+    });
+    const outcome = notExposed(
+      await assemble(targeted(), [
+        source('episodes', 'episode_history', [item]),
+      ]),
+    );
+    expect(outcome.brokerErrorCode).toBe('invalid_candidate');
+    expect(text(outcome)).not.toContain('secret');
+    expect(reads.other).toBe(0);
+    expect(
+      await direct([source('episodes', 'episode_history', [item])]),
+    ).toEqual({
+      ok: false,
+      code: 'invalid_candidate',
+    });
+  });
+
+  it('touches a foreign Proxy only through its ownership read, and fails closed on a revoked Proxy', async () => {
+    const keys: (string | symbol)[] = [];
+    const proxy = new Proxy(
+      { ...evidenceCandidate('p', 'Synthetic proxied', FOREIGN) },
+      {
+        get(target, key, receiver) {
+          keys.push(key);
+          return Reflect.get(target, key, receiver);
+        },
+      },
+    );
+    const ok = exposed(
+      await assemble(targeted(), [
+        source('episodes', 'episode_history', [evidenceCandidate('t'), proxy]),
+      ]),
+    );
+    expect(keys).toEqual(['ownerId']);
+    expect(text(ok)).not.toContain('Synthetic proxied');
+    const { proxy: revoked, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const failed = notExposed(
+      await assemble(targeted(), [
+        source('episodes', 'episode_history', [revoked]),
+      ]),
+    );
+    expect(failed.brokerErrorCode).toBe('invalid_candidate');
+    expect(
+      await direct([source('episodes', 'episode_history', [revoked])]),
+    ).toEqual({ ok: false, code: 'invalid_candidate' });
+  });
+});
+
+describe('Patch 6 remediation F2: malformed candidates are validated before any suppression', () => {
+  const withSignals = (signals: Record<string, unknown>) =>
+    deepFrozen({
+      ...evidenceCandidate('t'),
+      signals,
+    }) as unknown as ContextCandidate;
+  const bad: [string, Record<string, unknown>, string][] = [
+    [
+      'missing negativeRetrieval',
+      { confidence: 0.5, salience: 0.5 },
+      'invalid_score_metadata',
+    ],
+    [
+      'string negativeRetrieval',
+      { confidence: 0.5, salience: 0.5, negativeRetrieval: '0' },
+      'invalid_score_metadata',
+    ],
+    [
+      'negative negativeRetrieval',
+      { confidence: 0.5, salience: 0.5, negativeRetrieval: -1 },
+      'invalid_score_metadata',
+    ],
+    [
+      'too large negativeRetrieval',
+      { confidence: 0.5, salience: 0.5, negativeRetrieval: 2 },
+      'invalid_score_metadata',
+    ],
+    [
+      'NaN negativeRetrieval',
+      { confidence: 0.5, salience: 0.5, negativeRetrieval: Number.NaN },
+      'invalid_score_metadata',
+    ],
+    [
+      'Infinity negativeRetrieval',
+      {
+        confidence: 0.5,
+        salience: 0.5,
+        negativeRetrieval: Number.POSITIVE_INFINITY,
+      },
+      'invalid_score_metadata',
+    ],
+    [
+      'invalid confidence',
+      { confidence: 2, salience: 0.5, negativeRetrieval: 0 },
+      'invalid_score_metadata',
+    ],
+    [
+      'invalid salience',
+      { confidence: 0.5, salience: -1, negativeRetrieval: 0 },
+      'invalid_score_metadata',
+    ],
+  ];
+
+  for (const [label, signals, code] of bad)
+    it(`never repairs ${label} on an exact target (Broker and wrapper both refuse)`, async () => {
+      const candidate = withSignals(signals);
+      expect(
+        await direct([source('episodes', 'episode_history', [candidate])]),
+      ).toEqual({
+        ok: false,
+        code,
+      });
+      const failed = notExposed(
+        await assemble(targeted(), [
+          source('episodes', 'episode_history', [candidate]),
+        ]),
+      );
+      expect(failed.reason).toBe('assembly_failed');
+      expect(failed.brokerErrorCode).toBe(code);
+    });
+
+  it('never repairs a malformed exact-target reference or owner', async () => {
+    for (const candidate of [
+      deepFrozen({
+        ...evidenceCandidate('t'),
+        reference: {
+          kind: 'evidence',
+          reference: { ...evidenceRef('t'), extra: 1 },
+        },
+      }),
+      deepFrozen({ ...evidenceCandidate('t'), scope: { kind: 'bounded' } }),
+      deepFrozen({ ...evidenceCandidate('t'), text: '' }),
+    ]) {
+      const viaBroker = await direct([
+        source('episodes', 'episode_history', [candidate]),
+      ]);
+      expect(viaBroker).toEqual({ ok: false, code: 'invalid_candidate' });
+      const failed = notExposed(
+        await assemble(targeted(), [
+          source('episodes', 'episode_history', [candidate]),
+        ]),
+      );
+      expect(failed.brokerErrorCode).toBe('invalid_candidate');
+    }
+  });
+
+  it('suppresses a valid exact target from any legitimate prior value, changing nothing else', async () => {
+    for (const prior of [0, 0.25, 0.5, 1]) {
+      const candidate = withSignals({
+        confidence: 0.25,
+        salience: 0.75,
+        negativeRetrieval: prior,
+      });
+      const before = text(candidate);
+      const ok = exposed(
+        await assemble(targeted(), [
+          source('episodes', 'episode_history', [candidate]),
+        ]),
+      );
+      const traced = traceOf(ok, 'base-evidence-t');
+      expect(traced.signals).toEqual({
+        confidence: 0.25,
+        salience: 0.75,
+        negativeRetrieval: 1,
+      });
+      expect(traced.exclusionReason).toBe('negative_signal_suppressed');
+      expect(text(candidate)).toBe(before);
+    }
+  });
+});
+
+describe('Patch 6 remediation F3: only fixed Broker error codes are ever reported', () => {
+  const SECRET = 'SELECT secret FROM owners -- /var/lib/aven/owner.sqlite';
+  const throwing = (
+    field: 'sourceId' | 'kind' | 'collect',
+    thrown: () => unknown,
+  ) => {
+    const s = {
+      sourceId: 'episodes',
+      kind: 'episode_history',
+      collect: () => [],
+    };
+    Object.defineProperty(s, field, {
+      enumerable: true,
+      get() {
+        throw thrown();
+      },
+    });
+    return s as unknown as ContextSource;
+  };
+  const altered = () => {
+    const e = new ContextBrokerError('source_failure');
+    Object.defineProperty(e, 'code', { value: SECRET });
+    return e;
+  };
+  let codeGetterCalls = 0;
+  const hostileCode = () =>
+    Object.defineProperty({}, 'code', {
+      get() {
+        codeGetterCalls += 1;
+        return SECRET;
+      },
+    });
+  const spoofed = () =>
+    Object.create(ContextBrokerError.prototype, {
+      code: { value: SECRET },
+    }) as unknown;
+
+  it('maps any throw while reading a base source to the fixed invalid_configuration', async () => {
+    for (const field of ['sourceId', 'kind', 'collect'] as const)
+      for (const thrown of [
+        altered,
+        () => new Error(SECRET),
+        hostileCode,
+        spoofed,
+      ]) {
+        for (const h of [history(), targeted()]) {
+          const failed = notExposed(
+            await assemble(h, [throwing(field, thrown)]),
+          );
+          expect(failed.reason).toBe('assembly_failed');
+          expect(failed.brokerErrorCode).toBe('invalid_configuration');
+          expect(text(failed)).not.toContain('secret');
+          expect(text(failed)).not.toContain('sqlite');
+        }
+        expect(await direct([throwing(field, thrown)])).toEqual({
+          ok: false,
+          code: 'invalid_configuration',
+        });
+      }
+    expect(codeGetterCalls).toBe(0);
+  });
+
+  it('reports only declared Broker codes for real Broker failures, never thrown properties', async () => {
+    const rejecting = (thrown: () => unknown): ContextSource =>
+      Object.freeze({
+        sourceId: 'episodes',
+        kind: 'episode_history' as const,
+        collect: () => {
+          throw thrown();
+        },
+      });
+    for (const thrown of [
+      altered,
+      hostileCode,
+      spoofed,
+      () => new Error(SECRET),
+    ]) {
+      const failed = notExposed(
+        await assemble(targeted(), [rejecting(thrown)]),
+      );
+      expect(failed.brokerErrorCode).toBe('source_failure');
+      expect(text(failed)).not.toContain('secret');
+    }
+    const clash = notExposed(
+      await assemble(history(), [
+        source(INSTRUCTION_SOURCE, 'active_task', []),
+      ]),
+    );
+    expect(clash.brokerErrorCode).toBe('invalid_configuration');
+    for (const code of ['source_failure', 'invalid_configuration'])
+      expect(CONTEXT_BROKER_ERROR_CODES).toContain(code);
+    expect(codeGetterCalls).toBe(0);
+  });
+});
+
+describe('Patch 6 remediation F4: raw-resource and quota guards run before any element read', () => {
+  /** `n` recognizable foreign items with counting ownership getters. */
+  const foreignItems = (n: number, reads: Reads) =>
+    Array.from({ length: n }, () =>
+      Object.defineProperty(
+        Object.defineProperty({}, 'text', {
+          enumerable: true,
+          get() {
+            reads.other += 1;
+            return 'never';
+          },
+        }),
+        'ownerId',
+        {
+          enumerable: true,
+          get() {
+            reads.owner += 1;
+            return FOREIGN;
+          },
+        },
+      ),
+    );
+  /** `n` requester-owned items with counting getters (clones read `text`). */
+  const ownedItems = (n: number, reads: Reads) =>
+    Array.from({ length: n }, (_, i) => hostile([OWNER], reads, `own${i}`));
+
+  it(
+    'measures per-source raw bounds: identical reads to the Broker, zero reads beyond 10000',
+    { timeout: 120_000 },
+    async () => {
+      const measured: Record<number, [number, number, string]> = {};
+      for (const n of [0, 1, 9999, 10000, 10001, 20000]) {
+        const wrapped = fresh();
+        const plain = fresh();
+        const outcome = await assemble(targeted(), [
+          source('episodes', 'episode_history', foreignItems(n, wrapped)),
+        ]);
+        const baseline = await direct([
+          source('episodes', 'episode_history', foreignItems(n, plain)),
+        ]);
+        expect(wrapped, `n=${n}`).toEqual(plain);
+        expect(wrapped.other, `n=${n}`).toBe(0);
+        if (n > 10000) {
+          expect(wrapped.owner).toBe(0);
+          expect(baseline).toEqual({
+            ok: false,
+            code: 'source_resource_limit_exceeded',
+          });
+          expect(notExposed(outcome).brokerErrorCode).toBe(
+            'source_resource_limit_exceeded',
+          );
+        } else {
+          expect(wrapped.owner).toBe(n);
+          exposed(outcome);
+        }
+        measured[n] = [wrapped.owner, plain.owner, outcome.status];
+      }
+      expect(measured).toEqual({
+        0: [0, 0, 'exposed'],
+        1: [1, 1, 'exposed'],
+        9999: [9999, 9999, 'exposed'],
+        10000: [10000, 10000, 'exposed'],
+        10001: [0, 0, 'not_exposed'],
+        20000: [0, 0, 'not_exposed'],
+      });
+    },
+  );
+
+  it(
+    'keeps the aggregate raw bound: no element is read when sources together exceed 40000',
+    { timeout: 120_000 },
+    async () => {
+      const wrapped = fresh();
+      const plain = fresh();
+      const many = (reads: Reads) =>
+        Array.from({ length: 5 }, (_, i) =>
+          source(`episodes-${i}`, 'episode_history', foreignItems(8001, reads)),
+        );
+      const outcome = notExposed(await assemble(targeted(), many(wrapped)));
+      expect(outcome.brokerErrorCode).toBe('source_resource_limit_exceeded');
+      expect(await direct(many(plain))).toEqual({
+        ok: false,
+        code: 'source_resource_limit_exceeded',
+      });
+      expect(wrapped).toEqual({ owner: 0, other: 0 });
+      expect(plain).toEqual({ owner: 0, other: 0 });
+      // Exactly 40000 base items plus the one instruction also exceeds it.
+      const edge = fresh();
+      const exact = Array.from({ length: 4 }, (_, i) =>
+        source(`episodes-${i}`, 'episode_history', foreignItems(10000, edge)),
+      );
+      expect(
+        notExposed(await assemble(targeted(), exact)).brokerErrorCode,
+      ).toBe('source_resource_limit_exceeded');
+      expect(edge).toEqual({ owner: 0, other: 0 });
+    },
+  );
+
+  it(
+    'keeps owner quotas: no requester-owned item is cloned when a quota is exceeded',
+    { timeout: 120_000 },
+    async () => {
+      for (const [label, shape] of [
+        ['per source', [600]],
+        ['in total', [450, 450, 450, 450, 450]],
+      ] as const) {
+        const wrapped = fresh();
+        const plain = fresh();
+        const build = (reads: Reads) =>
+          shape.map((n, i) =>
+            source(`episodes-${i}`, 'episode_history', ownedItems(n, reads)),
+          );
+        const outcome = notExposed(await assemble(targeted(), build(wrapped)));
+        expect(outcome.brokerErrorCode, label).toBe('candidate_limit_exceeded');
+        expect(await direct(build(plain))).toEqual({
+          ok: false,
+          code: 'candidate_limit_exceeded',
+        });
+        expect(wrapped, label).toEqual(plain);
+        expect(wrapped.other, label).toBe(0);
+      }
+    },
+  );
+});
+
+describe('Patch 6 remediation: wrapped sources stay equivalent to the direct Broker', () => {
+  it('judges every non-targeted base candidate exactly as the Broker does, and only re-signals the exact target', async () => {
+    const sources = () => [
+      source('episodes', 'episode_history', [
+        evidenceCandidate('t'),
+        evidenceCandidate('a'),
+        evidenceCandidate('b', undefined, OWNER, {
+          evidenceId: 'evidence_base_b',
+          eventId: 'event_base_t',
+        }),
+        evidenceCandidate('x', 'Synthetic foreign', FOREIGN),
+      ]),
+      source(
+        'state',
+        'owner_state',
+        [stateCandidate('pref', 1), stateCandidate('pref', 2)],
+        'async',
+      ),
+    ];
+    const ok = exposed(await assemble(targeted(), sources()));
+    const baseline = await direct(sources());
+    if (!baseline.ok) throw new Error('baseline failed');
+    const plainTrace = baseline.trace as typeof ok.trace;
+    const strip = (c: (typeof ok.trace.candidates)[number]) => ({
+      ...c,
+      eligibleRank: null,
+      score: null,
+    });
+    const ours = ok.trace.candidates.filter(
+      (c) => c.sourceId !== INSTRUCTION_SOURCE,
+    );
+    expect(ours.map((c) => c.candidateId)).toEqual(
+      plainTrace.candidates.map((c) => c.candidateId),
+    );
+    for (const [i, c] of ours.entries()) {
+      const p = plainTrace.candidates[i]!;
+      if (c.candidateId === 'base-evidence-t') {
+        expect(p.signals.negativeRetrieval).toBe(0);
+        expect(c.signals).toEqual({ ...p.signals, negativeRetrieval: 1 });
+        expect(c.exclusionReason).toBe('negative_signal_suppressed');
+      } else {
+        // Same validation, scope, relevance, freshness and trust; only the
+        // rank position may move because the target left the ranking.
+        expect(strip(c), c.candidateId).toEqual(strip(p));
+        expect(c.score?.final ?? null).toBe(p.score?.final ?? null);
+      }
+    }
+    expect(text(ok)).not.toContain('Synthetic foreign');
+  });
+});
+
+describe('Patch 6 remediation: exact identity and error vocabulary, directly', () => {
+  it('never suppresses an evidence reference that matches only the evidence ID or only the event ID', async () => {
+    for (const ref of [
+      { evidenceId: 'evidence_base_t', eventId: 'event_base_other' },
+      { evidenceId: 'evidence_base_other', eventId: 'event_base_t' },
+    ]) {
+      const half = evidenceCandidate('half', undefined, OWNER, ref);
+      const ok = exposed(
+        await assemble(targeted(), [
+          source('episodes', 'episode_history', [half]),
+        ]),
+      );
+      const traced = traceOf(ok, 'base-evidence-half');
+      expect(traced.signals.negativeRetrieval, JSON.stringify(ref)).toBe(0);
+      expect(traced.selection).toBe('selected');
+    }
+  });
+
+  it('reports only declared Broker codes, read without running any getter', () => {
+    let getterCalls = 0;
+    const genuine = new ContextBrokerError('source_timeout');
+    const altered = new ContextBrokerError('source_failure');
+    Object.defineProperty(altered, 'code', {
+      value: 'SELECT secret FROM owners',
+    });
+    const hostile = new ContextBrokerError('source_failure');
+    Object.defineProperty(hostile, 'code', {
+      get() {
+        getterCalls += 1;
+        return 'source_failure';
+      },
+    });
+    const spoofed = Object.create(ContextBrokerError.prototype, {
+      code: { value: '/var/lib/aven/owner.sqlite' },
+    }) as unknown;
+    const lookalike = { name: 'ContextBrokerError', code: 'source_failure' };
+    expect(brokerCode(genuine)).toBe('source_timeout');
+    for (const code of CONTEXT_BROKER_ERROR_CODES)
+      expect(brokerCode(new ContextBrokerError(code))).toBe(code);
+    for (const bad of [
+      altered,
+      hostile,
+      spoofed,
+      lookalike,
+      new Error('x'),
+      null,
+      'source_failure',
+    ])
+      expect(brokerCode(bad)).toBeNull();
+    expect(getterCalls).toBe(0);
   });
 });
