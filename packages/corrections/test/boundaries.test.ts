@@ -46,6 +46,13 @@ const ledgerFile = (name: string) =>
  * re-export them.
  */
 const ledgerSource = ledgerFile('record.ts');
+/** Patch 6: the Context Broker integration subpath, under its own rules. */
+const contextDir = new URL('../src/context-source/', import.meta.url);
+const contextEntries = readdirSync(contextDir, { withFileTypes: true });
+const contextFile = (name: string) =>
+  code(readFileSync(new URL(name, contextDir), 'utf8'));
+const integrationSource = contextFile('integration.ts');
+const contextIndexSource = contextFile('index.ts');
 const historySource = ledgerFile('history.ts');
 const ledgerIndexSource = ledgerFile('index.ts');
 
@@ -524,9 +531,17 @@ describe('AVEN-010 corrections static regression tripwires (not runtime security
       'inert.ts',
       'resolve.ts',
     ]);
-    expect(entries.filter((e) => !e.isFile()).map((e) => e.name)).toEqual([
-      'ledger',
-    ]);
+    expect(
+      entries
+        .filter((e) => !e.isFile())
+        .map((e) => e.name)
+        .sort(),
+    ).toEqual(['context-source', 'ledger']);
+    expect(
+      contextEntries
+        .map((e) => `${e.isFile() ? 'file' : 'dir'}:${e.name}`)
+        .sort(),
+    ).toEqual(['file:index.ts', 'file:integration.ts']);
     expect(
       ledgerEntries
         .map((e) => `${e.isFile() ? 'file' : 'dir'}:${e.name}`)
@@ -595,8 +610,10 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
       './ledger': './src/ledger/index.ts',
+      './context-source': './src/context-source/index.ts',
     });
     expect(manifest.dependencies).toEqual({
+      '@aven/context-broker': 'workspace:*',
       '@aven/contracts': 'workspace:*',
       '@aven/ledger': 'workspace:*',
       '@aven/storage': 'workspace:*',
@@ -626,11 +643,12 @@ describe('AVEN-010 corrections manifest, workspace resolution and root wiring', 
     const local = new URL('../node_modules/', import.meta.url);
     const linked = (name: string) => realpathSync(new URL(name, local));
     expect(readdirSync(new URL('@aven/', local)).sort()).toEqual([
+      'context-broker',
       'contracts',
       'ledger',
       'storage',
     ]);
-    for (const name of ['contracts', 'ledger', 'storage'])
+    for (const name of ['context-broker', 'contracts', 'ledger', 'storage'])
       expect(linked(`@aven/${name}`)).toBe(
         realpathSync(new URL(`../../${name}/`, import.meta.url)),
       );
@@ -1101,5 +1119,197 @@ describe('AVEN-010 corrections read-only history module boundaries (patch 5; not
     expect(count(ledgerSource, /new\s+Date\s*\(\s*\)/)).toBe(1);
     expect(count(ledgerSource, /\brandomUUID\s*\(/)).toBe(1);
     expect(historySource).not.toMatch(/new\s+Date|randomUUID/);
+  });
+});
+
+/**
+ * The Context Broker integration (patch 6), under its OWN rules: it may use
+ * the frozen Broker's public API, the pure resolver and a SHA-256 digest for
+ * candidate identities, and nothing that reads or writes storage, appends to
+ * the Ledger, reads owner state, learns, calls a model or network, uses a
+ * clock or randomness, touches Broker internals or limits, renders the
+ * original behavior, judges exposure from the trace ranking, or decides
+ * authority. The recorder's and history module's rules are unchanged.
+ */
+const CONTEXT_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
+  'node:crypto': new Set(['createHash']),
+  '@aven/context-broker': new Set([
+    'ContextBrokerError',
+    'ContextCandidateSchema',
+    'ContextRequestSchema',
+    'createContextBroker',
+    'ContextBrokerErrorCode',
+    'ContextBrokerTrace',
+    'ContextBundle',
+    'ContextBundleItem',
+    'ContextCandidate',
+    'ContextRequest',
+    'ContextSource',
+    'ContextSourceCollectOptions',
+    'ContextSourceQuery',
+    'ExclusionReason',
+  ]),
+  '../errors.ts': new Set(['CorrectionError']),
+  '../resolve.ts': new Set([
+    'resolveImmediateCorrections',
+    'ActiveCorrection',
+    'ImmediateCorrectionView',
+  ]),
+};
+const CONTEXT_INDEX_IMPORT_ALLOWLIST: Record<string, ReadonlySet<string>> = {
+  './integration.ts': new Set([
+    'assembleWithCorrections',
+    'CORRECTION_INSTRUCTION_SOURCE_ID',
+    'CorrectionAssemblyInput',
+    'CorrectionAssemblyOutcome',
+    'InstructionIdentity',
+    'MissingInstruction',
+    'NotExposedReason',
+  ]),
+};
+
+const CONTEXT_RULES: Record<string, (text: string) => boolean> = {
+  'storage, Ledger, SQL or persisted-history access': (t) =>
+    /@aven\/(storage|ledger)\b|\.prepare\s*\(|\bsqlite\b|appendEvent|createLedger|replayEvents|listEvents|readCorrectionHistory|recordOwnerCorrection|\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|BEGIN|COMMIT)\b|\bmigrate\s*\(|openStorage/.test(
+      t,
+    ),
+  'other Aven packages, runtimes, Root or providers': (t) =>
+    /@aven\/(owner-model|api|root|learning|eval|test-utils|runtime|baseline)\b|apps\/api|context-broker\/src|ModelRuntime|invokeModel|openai|anthropic|gemini|ollama|bedrock|langchain|\bprompt/i.test(
+      t,
+    ),
+  'network, files, processes, environment or timers': (t) =>
+    /\bfetch\b|\bhttps?\.|WebSocket|\bnet\.|\btls\.|readFile|writeFile|\bfs\.|child_process|\bspawn(Sync)?\s*\(|\bexec(File)?(Sync)?\s*\(|worker_threads|process\.env|\bglobalThis\b|\beval\s*\(|new\s+Function\s*\(|\bset(Timeout|Interval|Immediate)\b|queueMicrotask/.test(
+      t,
+    ),
+  'a clock or randomness': (t) =>
+    /Date\.now|new\s+Date\b|(?<![\w.])Date\s*\(|performance\.now|hrtime|randomUUID|Math\.random|getRandomValues|randomBytes|randomInt/.test(
+      t,
+    ),
+  'Broker internals, limits or ranking configuration': (t) =>
+    /RANKING_WEIGHTS|SCOPE_FACTORS|PROVENANCE_FACTORS|TRUST_FACTORS|FRESHNESS_|MAX_SELECTED|MAX_SINGLE_CONTEXT|MAX_CANDIDATE|MAX_RAW|MAX_SOURCES|SOURCE_COLLECTION_DEADLINE|NEGATIVE_SIGNAL|\bINTERNAL\b|CONTEXT_BROKER_CONFIG/.test(
+      t,
+    ),
+  'fixed instruction signals': (t) =>
+    count(t, /confidence:\s*1,\s*salience:\s*1,\s*negativeRetrieval:\s*0/) !==
+      1 ||
+    count(t, /\bconfidence\s*:/) !== 1 ||
+    count(t, /\bsalience\s*:/) !== 1 ||
+    count(t, /\bnegativeRetrieval\s*:/) !== 2,
+  'original behavior or durable scope hint': (t) =>
+    /originalBehavior|durableScopeHint/.test(t),
+  'exposure judged from the trace ranking instead of the bundle': (t) =>
+    /\.ranking\b|\.selected\b|eligibleRank|\.totals\b/.test(t),
+  'owner-state writes, learning or promotion': (t) =>
+    /learned_owner_state|lifecycle_records|learning_candidates|promot|demot|markTrusted|grantTrust|setLifecycle|inferPreference|detectCorrection|hypothes|\blearn(s|ed|ing)?\b/i.test(
+      t,
+    ),
+  'authority, approval, Root or tools': (t) =>
+    /\b(ALLOW|DENY|REQUIRE_OWNER_APPROVAL)\b|PolicyDecision|ActionProposal|OwnerApproval|ToolExecution|executeTool|authori[sz]|\bgrant(ed|s)?\b|approv/i.test(
+      t,
+    ),
+  'hidden reasoning fields': (t) =>
+    /reasoning|chainOfThought|chain_of_thought|\bthoughts?\b|rationale|scratchpad/i.test(
+      t,
+    ),
+};
+
+const CONTEXT_BASE = integrationSource;
+const CONTEXT_KNOWN_BAD: Record<string, string[]> = {
+  'storage, Ledger, SQL or persisted-history access': [
+    `${CONTEXT_BASE}\nimport { openStorage } from '@aven/storage';`,
+    `${CONTEXT_BASE}\nconst h = readCorrectionHistory(storage, owner);`,
+    `${CONTEXT_BASE}\nledger.appendEvent(event);`,
+    `${CONTEXT_BASE}\nconst q = 'SELECT 1 FROM corrections';`,
+  ],
+  'other Aven packages, runtimes, Root or providers': [
+    `${CONTEXT_BASE}\nimport { createOwnerModelContextSources } from '@aven/owner-model/context-source';`,
+    `${CONTEXT_BASE}\nimport { assess } from '../../../context-broker/src/broker.ts';`,
+    `${CONTEXT_BASE}\nconst out = await runtime.invokeModel(prompt);`,
+  ],
+  'network, files, processes, environment or timers': [
+    `${CONTEXT_BASE}\nawait fetch('https://example.invalid');`,
+    `${CONTEXT_BASE}\nsetTimeout(retry, 1000);`,
+    `${CONTEXT_BASE}\nconst k = process.env.KEY;`,
+  ],
+  'a clock or randomness': [
+    `${CONTEXT_BASE}\nconst at = new Date().toISOString();`,
+    `${CONTEXT_BASE}\nconst id = randomUUID();`,
+    `${CONTEXT_BASE}\nconst j = Math.random();`,
+  ],
+  'Broker internals, limits or ranking configuration': [
+    `${CONTEXT_BASE}\nif (items.length > MAX_SELECTED_ITEMS) trim();`,
+    `${CONTEXT_BASE}\nconst w = RANKING_WEIGHTS_BASIS_POINTS.relevance;`,
+    `${CONTEXT_BASE}\nINTERNAL.candidate.parse(x);`,
+  ],
+  'fixed instruction signals': [
+    CONTEXT_BASE.replace(/salience:\s*1,/, 'salience: 0.9,'),
+    `${CONTEXT_BASE}\nconst boosted = { confidence: 0.9 };`,
+    `${CONTEXT_BASE}\nconst s = { negativeRetrieval: 0.5 };`,
+  ],
+  'original behavior or durable scope hint': [
+    `${CONTEXT_BASE}\nconst text = correction.originalBehavior;`,
+    `${CONTEXT_BASE}\nif (payload.durableScopeHint.kind === 'global') widen();`,
+  ],
+  'exposure judged from the trace ranking instead of the bundle': [
+    `${CONTEXT_BASE}\nconst ok = assembly.trace.selected.some(match);`,
+    `${CONTEXT_BASE}\nconst ok = assembly.trace.ranking.length > 0;`,
+    `${CONTEXT_BASE}\nconst ok = candidate.eligibleRank !== null;`,
+  ],
+  'owner-state writes, learning or promotion': [
+    `${CONTEXT_BASE}\nconst table = 'learned_owner_state';`,
+    `${CONTEXT_BASE}\npromote(correction);`,
+    `${CONTEXT_BASE}\nconst p = inferPreference(history);`,
+  ],
+  'authority, approval, Root or tools': [
+    `${CONTEXT_BASE}\nif (category === 'permission') return { decision: 'ALLOW' };`,
+    `${CONTEXT_BASE}\nconst authorized = true;`,
+    `${CONTEXT_BASE}\nexecuteTool(proposal);`,
+  ],
+  'hidden reasoning fields': [`${CONTEXT_BASE}\nreturn { reasoning: why };`],
+};
+
+describe('AVEN-010 corrections context-source subpath boundaries (patch 6; not runtime security)', () => {
+  it('imports only allowlisted names, and the entry only re-exports the integration', () => {
+    expect(
+      ledgerImportViolations(integrationSource, CONTEXT_IMPORT_ALLOWLIST),
+    ).toEqual([]);
+    expect(
+      ledgerImportViolations(
+        contextIndexSource,
+        CONTEXT_INDEX_IMPORT_ALLOWLIST,
+      ),
+    ).toEqual([]);
+    expect(
+      contextIndexSource
+        .replace(/export\s*\{[^}]*\}\s*from\s*'\.\/integration\.ts';/g, '')
+        .trim(),
+    ).toBe('');
+    for (const bad of [
+      `import { randomUUID } from 'node:crypto';`,
+      `import { readCorrectionHistory } from '../ledger/index.ts';`,
+      `import { createLedger } from '@aven/ledger';`,
+      `import { CONTEXT_BROKER_CONFIG_V2 } from '@aven/context-broker';`,
+      `import { recordOwnerCorrection } from '../ledger/record.ts';`,
+      `import * as broker from '@aven/context-broker';`,
+    ])
+      expect(
+        ledgerImportViolations(bad, CONTEXT_IMPORT_ALLOWLIST),
+        bad,
+      ).not.toEqual([]);
+  });
+
+  for (const [rule, violates] of Object.entries(CONTEXT_RULES))
+    it(`has no ${rule}`, () => {
+      expect(violates(integrationSource), rule).toBe(false);
+      for (const bad of CONTEXT_KNOWN_BAD[rule]!)
+        expect(violates(bad), bad.slice(CONTEXT_BASE.length)).toBe(true);
+    });
+
+  it('keeps the root entry free of the Broker and the other subpaths free of each other', () => {
+    expect(all).not.toMatch(/context-broker|context-source/);
+    expect(ledgerSource + historySource).not.toMatch(
+      /context-broker|context-source/,
+    );
+    expect(integrationSource).not.toMatch(/ledger\//);
   });
 });

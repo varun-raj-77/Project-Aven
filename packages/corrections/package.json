@@ -3,16 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-010 correction events and immediate session overrides: package identity, fixed errors and the pure immediate-override resolver (root); ./ledger records one explicit owner correction through one frozen Ledger append and reads recorded correction history read-only. No context source, owner-state writer, learning or authority",
+  "description": "AVEN-010 correction events and immediate session overrides: package identity, fixed errors and the pure immediate-override resolver (root); ./ledger records one explicit owner correction through one frozen Ledger append and reads recorded correction history read-only; ./context-source exposes active corrections to the frozen Context Broker and verifies exposure. No owner-state writer, learning or authority",
   "exports": {
     ".": "./src/index.ts",
-    "./ledger": "./src/ledger/index.ts"
+    "./ledger": "./src/ledger/index.ts",
+    "./context-source": "./src/context-source/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/corrections/test"
   },
   "dependencies": {
+    "@aven/context-broker": "workspace:*",
     "@aven/contracts": "workspace:*",
     "@aven/ledger": "workspace:*",
     "@aven/storage": "workspace:*",

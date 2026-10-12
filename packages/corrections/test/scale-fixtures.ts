@@ -54,6 +54,8 @@ export interface ScaleSpec {
   readonly target: ScaleTarget;
   readonly extraEvidence?: readonly string[];
   readonly recordedAt?: string;
+  /** The corrected instruction; defaults to `Synthetic <name>`. */
+  readonly instruction?: string;
 }
 
 export interface ScaleEntry {
@@ -92,7 +94,7 @@ export function scaleEntry(spec: ScaleSpec): ScaleEntry {
         : { kind: spec.kind };
   const own = scaleEvidenceId(spec.name);
   const evidenceIds = [own, ...(spec.extraEvidence ?? [])];
-  const instruction = `Synthetic ${spec.name}`;
+  const instruction = spec.instruction ?? `Synthetic ${spec.name}`;
   const event = {
     kind: 'experience_event',
     ownerId: SCALE_OWNER,
