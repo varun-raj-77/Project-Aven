@@ -587,17 +587,83 @@ const gateDrift = (
     )
     .map(([file]) => file);
 /**
- * Reads a repository file's own bytes. R4: a symbolic link (or anything but
- * a regular file) is refused rather than followed, so a pinned file can never
- * be satisfied through a link to identical bytes elsewhere.
+ * R4 follow-up (Codex re-audit R4-N2): the ONE guarded path primitive used
+ * for every hash read, directory listing and work-tree classification in this
+ * file. The operating system resolves every parent directory before the last
+ * component, so checking only the last component (`lstat` of the full path)
+ * lets a linked ANCESTOR (a POSIX directory symlink or a Windows junction,
+ * which Node's `lstat` reports as a symbolic link) redirect a read elsewhere.
+ *
+ * Starting from an already canonical repository root, `inspectRepoPath`
+ * walks the Git-style relative path one component at a time with `lstat`:
+ * any linked component is refused (`linked_ancestor`, or `symlink` for the
+ * last one) wherever it points, inside the repository or not; an ancestor
+ * that is not a plain directory is refused; empty, `.` and `..` segments,
+ * backslashes, colons and NUL are refused as `unsafe_path`. Nothing is
+ * resolved or followed, and containment is never inferred from `realpath`.
+ * This is test-time regression tooling, not race-free filesystem isolation:
+ * the tree can change between the check and a read.
  */
-const readRegular = (location: URL | string): Buffer => {
-  if (!lstatSync(location).isFile())
-    throw new Error('not a regular file: refusing to follow');
-  return readFileSync(location);
-};
-const readRepoFile = (file: string): Buffer =>
-  readRegular(new URL(file, repoRoot));
+type GuardedKind =
+  | 'file'
+  | 'directory'
+  | 'symlink'
+  | 'other'
+  | 'missing'
+  | 'linked_ancestor'
+  | 'ancestor_not_directory'
+  | 'unsafe_path';
+
+/** The components of a safe Git-style relative path, else `undefined`. */
+function safeSegments(relative: string): string[] | undefined {
+  if (relative === '' || /[\\:\0]/.test(relative)) return undefined;
+  const segments = relative.split('/');
+  return segments.every((s) => s !== '' && s !== '.' && s !== '..')
+    ? segments
+    : undefined;
+}
+
+/** Classifies `relative` under the canonical `root`, never following links. */
+function inspectRepoPath(root: string, relative: string): GuardedKind {
+  const segments = safeSegments(relative);
+  if (segments === undefined) return 'unsafe_path';
+  let current = root;
+  for (const [index, segment] of segments.entries()) {
+    current = join(current, segment);
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'missing'
+        : 'other';
+    }
+    const last = index === segments.length - 1;
+    if (stat.isSymbolicLink()) return last ? 'symlink' : 'linked_ancestor';
+    if (last)
+      return stat.isFile()
+        ? 'file'
+        : stat.isDirectory()
+          ? 'directory'
+          : 'other';
+    if (!stat.isDirectory()) return 'ancestor_not_directory';
+  }
+  return 'unsafe_path'; // Unreachable: a safe path has at least one segment.
+}
+
+/** Reads a regular file's own bytes through the guard, or throws. */
+function readGuarded(root: string, relative: string): Buffer {
+  const kind = inspectRepoPath(root, relative);
+  if (kind !== 'file')
+    throw new Error(
+      `not a regular repository file (${kind}): refusing to follow ${JSON.stringify(relative)}`,
+    );
+  return readFileSync(join(root, ...relative.split('/')));
+}
+
+/** The established canonical root of this checkout. */
+const REPO_ROOT = realpathSync(fileURLToPath(repoRoot));
+const readRepoFile = (file: string): Buffer => readGuarded(REPO_ROOT, file);
 
 /**
  * SHA-256 of the serialized 226-entry AVEN-009 table above (its exact
@@ -610,8 +676,15 @@ const FROZEN_TABLE_DIGEST =
 const sha256 = (relativePath: string): string =>
   createHash('sha256').update(readRepoFile(relativePath)).digest('hex');
 
+/** Lists a plain directory reached through the guard, or throws. */
+function listGuarded(root: string, dir: string) {
+  const kind = inspectRepoPath(root, dir);
+  if (kind !== 'directory')
+    throw new Error(`not a plain repository directory (${kind}): ${dir}`);
+  return readdirSync(join(root, ...dir.split('/')), { withFileTypes: true });
+}
 const children = (dir: string) =>
-  readdirSync(new URL(`${dir}/`, repoRoot), { withFileTypes: true }).filter(
+  listGuarded(REPO_ROOT, dir).filter(
     // Installed dependency links are not repository content.
     (entry) => entry.name !== 'node_modules' && !entry.isSymbolicLink(),
   );
@@ -771,9 +844,9 @@ describe('AVEN-010 frozen layers (tooling tripwire, not runtime security)', () =
         .map((e) => `tooling/attribution/${e.name}`)
         .sort(),
     ).toEqual(Object.keys(ACCEPTED_ATTRIBUTION_GATE).sort());
-    const root = JSON.parse(
-      readFileSync(new URL('package.json', repoRoot), 'utf8'),
-    ) as { scripts: Record<string, string> };
+    const root = JSON.parse(readRepoFile('package.json').toString('utf8')) as {
+      scripts: Record<string, string>;
+    };
     expect(root.scripts['attribution:check']).toBe(
       'node tooling/attribution/check-attribution.ts',
     );
@@ -928,9 +1001,11 @@ const REGULAR_MODE = '100644';
 /** Fixed finding reasons, in reporting order (per path). */
 const REASONS = [
   'unauthorized_addition',
+  'unsafe_path',
   'missing_from_index',
   'missing_from_worktree',
   'unmerged_entry',
+  'linked_ancestor',
   'symbolic_link',
   'gitlink',
   'nested_repository',
@@ -939,7 +1014,7 @@ const REASONS = [
   'worktree_type_mismatch',
 ] as const;
 type Reason = (typeof REASONS)[number];
-type WorktreeType = 'file' | 'symlink' | 'directory' | 'other' | 'missing';
+type WorktreeType = GuardedKind;
 
 interface PathPolicy {
   /** Tracked at the frozen baseline; must stay tracked regular files. */
@@ -1014,22 +1089,6 @@ const nulRecords = (output: string): string[] => {
   return output.slice(0, -1).split('\0');
 };
 
-/** The type of the path itself (never following a link). */
-function worktreeType(dir: string, path: string): WorktreeType {
-  try {
-    const stat = lstatSync(join(dir, path));
-    return stat.isSymbolicLink()
-      ? 'symlink'
-      : stat.isFile()
-        ? 'file'
-        : stat.isDirectory()
-          ? 'directory'
-          : 'other';
-  } catch {
-    return 'missing';
-  }
-}
-
 /** Every index entry and every untracked, non-ignored path of `dir`. */
 function repositoryInventory(dir: string): Inventory {
   const git = inspectGit(dir);
@@ -1060,13 +1119,20 @@ function repositoryInventory(dir: string): Inventory {
         path,
         mode: match[1]!,
         stage: match[3]!,
-        worktree: worktreeType(root, path),
+        worktree: inspectRepoPath(root, path),
       };
     },
   );
   const untracked = nulRecords(
     git(['ls-files', '--others', '--exclude-standard', '-z']),
-  ).map((path) => ({ path, worktree: worktreeType(root, path) }));
+  ).map((path) => ({
+    path,
+    // A nested repository is listed as `dir/`; inspect the directory itself.
+    worktree: inspectRepoPath(
+      root,
+      path.endsWith('/') ? path.slice(0, -1) : path,
+    ),
+  }));
   return { tracked, untracked };
 }
 
@@ -1090,9 +1156,15 @@ function classifyInventory(
     else if (entry.mode === '160000') add('gitlink', entry.path);
     else if (entry.mode === '100755') add('executable_mode', entry.path);
     else if (entry.mode !== REGULAR_MODE) add('unexpected_mode', entry.path);
-    else if (entry.worktree === 'missing') {
-      if (required.has(entry.path)) add('missing_from_worktree', entry.path);
-    } else if (entry.worktree !== 'file')
+    // R4-N1: EVERY indexed regular file (baseline, update or new addition,
+    // committed or only staged) must exist in the work tree as a regular
+    // file reached through plain directories.
+    else if (entry.worktree === 'missing')
+      add('missing_from_worktree', entry.path);
+    else if (entry.worktree === 'linked_ancestor')
+      add('linked_ancestor', entry.path);
+    else if (entry.worktree === 'unsafe_path') add('unsafe_path', entry.path);
+    else if (entry.worktree !== 'file')
       add('worktree_type_mismatch', entry.path);
   }
   for (const path of required)
@@ -1100,6 +1172,9 @@ function classifyInventory(
   for (const entry of inventory.untracked) {
     if (!permitted(entry.path)) add('unauthorized_addition', entry.path);
     if (entry.worktree === 'symlink') add('symbolic_link', entry.path);
+    else if (entry.worktree === 'linked_ancestor')
+      add('linked_ancestor', entry.path);
+    else if (entry.worktree === 'unsafe_path') add('unsafe_path', entry.path);
     else if (entry.path.endsWith('/') || entry.worktree === 'directory')
       add('nested_repository', entry.path);
   }
@@ -1650,19 +1725,12 @@ describe('R4 repository-wide addition guard over real temporary Git repositories
     },
   );
 
-  it('15. never follows a link when hashing a pinned file', R4_TIMEOUT, () => {
-    const dir = join(r4Scratch, `links-${++r4Counter}`);
-    mkdirSync(dir);
-    writeFileSync(join(dir, 'real.txt'), 'pinned bytes\n');
-    expect(readRegular(join(dir, 'real.txt')).toString()).toBe(
-      'pinned bytes\n',
-    );
-    expect(() => readRegular(dir)).toThrow('not a regular file');
-    if (!symlinksAvailable) return; // Documented: no link to read on such hosts.
-    symlinkSync(join(dir, 'real.txt'), join(dir, 'link.txt'));
-    expect(() => readRegular(join(dir, 'link.txt'))).toThrow(
-      'not a regular file',
-    );
+  it('15. reads pinned bytes only through the guarded path primitive', () => {
+    // Real repository reads go through the same guard as the inventory.
+    expect(readRepoFile('.gitignore').equals(REAL_GITIGNORE)).toBe(true);
+    expect(() => readRepoFile('packages')).toThrow('(directory)');
+    expect(() => readRepoFile('../outside.txt')).toThrow('(unsafe_path)');
+    expect(() => readRepoFile('missing-file.ts')).toThrow('(missing)');
   });
 
   it(
@@ -1883,6 +1951,370 @@ describe('R4 repository-wide addition guard over real temporary Git repositories
           if (v === undefined) delete process.env[k];
           else process.env[k] = v;
       }
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// R4 follow-up: Codex re-audit findings R4-N1 (indexed additions missing from
+// the work tree passed) and R4-N2 (a linked ANCESTOR directory, e.g. a Windows
+// junction, redirected reads while the final component looked regular).
+// POSIX directory symlinks stand in for junctions here: Node's `lstat`
+// reports both as symbolic links, and the guard inspects every component the
+// same way. No Windows junction was created by these tests.
+// ---------------------------------------------------------------------------
+
+describe('R4-N2 guarded path primitive (temporary directories)', () => {
+  const tree = () => {
+    const root = realpathSync(
+      mkdtempSync(join(r4Scratch, `guard-${++r4Counter}-`)),
+    );
+    const outside = realpathSync(
+      mkdtempSync(join(r4Scratch, `outside-${++r4Counter}-`)),
+    );
+    mkdirSync(join(root, 'a', 'b', 'c'), { recursive: true });
+    writeFileSync(join(root, 'a', 'b', 'c', 'leaf.ts'), 'pinned\n');
+    mkdirSync(join(outside, 'b', 'c'), { recursive: true });
+    writeFileSync(join(outside, 'b', 'c', 'leaf.ts'), 'pinned\n');
+    writeFileSync(join(outside, 'leaf.ts'), 'pinned\n');
+    return { root, outside };
+  };
+
+  it('accepts ordinary nested directories and a regular leaf', () => {
+    const { root } = tree();
+    expect(inspectRepoPath(root, 'a/b/c/leaf.ts')).toBe('file');
+    expect(inspectRepoPath(root, 'a/b/c')).toBe('directory');
+    expect(readGuarded(root, 'a/b/c/leaf.ts').toString()).toBe('pinned\n');
+    expect(inspectRepoPath(root, 'a/b/c/absent.ts')).toBe('missing');
+    expect(inspectRepoPath(root, 'a/absent/c/leaf.ts')).toBe('missing');
+    // An ancestor that is a file, not a directory.
+    expect(inspectRepoPath(root, 'a/b/c/leaf.ts/x')).toBe(
+      'ancestor_not_directory',
+    );
+  });
+
+  it('refuses unsafe relative paths without touching the filesystem', () => {
+    const { root } = tree();
+    for (const bad of [
+      '',
+      '/a/b/c/leaf.ts',
+      '../outside.ts',
+      'a/../a/b/c/leaf.ts',
+      'a//b/c/leaf.ts',
+      './a/b/c/leaf.ts',
+      'a/b/c/leaf.ts/',
+      'a\\b\\c\\leaf.ts',
+      'C:/a/b/c/leaf.ts',
+      'a/b/c/leaf.ts:stream',
+      'a/b/c/leaf\0.ts',
+    ]) {
+      expect(inspectRepoPath(root, bad), JSON.stringify(bad)).toBe(
+        'unsafe_path',
+      );
+      expect(() => readGuarded(root, bad), JSON.stringify(bad)).toThrow(
+        '(unsafe_path)',
+      );
+    }
+  });
+
+  it('refuses a linked component at every depth, wherever it points', () => {
+    if (!symlinksAvailable) return; // Documented host limitation.
+    const cases: [string, (t: { root: string; outside: string }) => void][] = [
+      [
+        'first component, outside, same content',
+        ({ root, outside }) => {
+          rmSync(join(root, 'a'), { recursive: true });
+          symlinkSync(outside, join(root, 'a'), 'dir');
+        },
+      ],
+      [
+        'intermediate component, outside, same content',
+        ({ root, outside }) => {
+          rmSync(join(root, 'a', 'b'), { recursive: true });
+          symlinkSync(join(outside, 'b'), join(root, 'a', 'b'), 'dir');
+        },
+      ],
+      [
+        'last directory component, outside, different content',
+        ({ root, outside }) => {
+          writeFileSync(join(outside, 'b', 'c', 'leaf.ts'), 'different\n');
+          rmSync(join(root, 'a', 'b', 'c'), { recursive: true });
+          symlinkSync(
+            join(outside, 'b', 'c'),
+            join(root, 'a', 'b', 'c'),
+            'dir',
+          );
+        },
+      ],
+      [
+        'intermediate component pointing INSIDE the root',
+        ({ root }) => {
+          mkdirSync(join(root, 'mirror', 'c'), { recursive: true });
+          writeFileSync(join(root, 'mirror', 'c', 'leaf.ts'), 'pinned\n');
+          rmSync(join(root, 'a', 'b'), { recursive: true });
+          symlinkSync(join(root, 'mirror'), join(root, 'a', 'b'), 'dir');
+        },
+      ],
+      [
+        'links several levels deep (a link inside a linked tree)',
+        ({ root, outside }) => {
+          const deeper = join(outside, 'deeper');
+          mkdirSync(join(deeper, 'c'), { recursive: true });
+          writeFileSync(join(deeper, 'c', 'leaf.ts'), 'pinned\n');
+          rmSync(join(outside, 'b'), { recursive: true });
+          symlinkSync(deeper, join(outside, 'b'), 'dir');
+          rmSync(join(root, 'a'), { recursive: true });
+          symlinkSync(outside, join(root, 'a'), 'dir');
+        },
+      ],
+    ];
+    for (const [label, attack] of cases) {
+      const t = tree();
+      attack(t);
+      // The OS still resolves the path to a readable regular file...
+      expect(lstatSync(join(t.root, 'a', 'b', 'c', 'leaf.ts')).isFile()).toBe(
+        true,
+      );
+      // ...but the guard refuses it, and never reads through the link.
+      expect(inspectRepoPath(t.root, 'a/b/c/leaf.ts'), label).toBe(
+        'linked_ancestor',
+      );
+      expect(() => readGuarded(t.root, 'a/b/c/leaf.ts'), label).toThrow(
+        '(linked_ancestor)',
+      );
+    }
+    // Directory listings use the same guard.
+    const listed = tree();
+    expect(listGuarded(listed.root, 'a/b').map((e) => e.name)).toEqual(['c']);
+    rmSync(join(listed.root, 'a', 'b'), { recursive: true });
+    symlinkSync(join(listed.outside, 'b'), join(listed.root, 'a', 'b'), 'dir');
+    expect(() => listGuarded(listed.root, 'a/b/c')).toThrow(
+      '(linked_ancestor)',
+    );
+    expect(() => listGuarded(listed.root, 'a/b')).toThrow('(symlink)');
+    // A linked final component.
+    const t = tree();
+    rmSync(join(t.root, 'a', 'b', 'c', 'leaf.ts'));
+    symlinkSync(
+      join(t.outside, 'leaf.ts'),
+      join(t.root, 'a', 'b', 'c', 'leaf.ts'),
+    );
+    expect(inspectRepoPath(t.root, 'a/b/c/leaf.ts')).toBe('symlink');
+    expect(() => readGuarded(t.root, 'a/b/c/leaf.ts')).toThrow('(symlink)');
+  });
+});
+
+describe('R4-N1 every indexed regular file must exist in the work tree', () => {
+  it(
+    'rejects a staged or committed authorized addition deleted from the work tree',
+    R4_TIMEOUT,
+    () => {
+      const staged = new InventoryRepo();
+      staged.write('packages/corrections/new.ts');
+      staged.git(['add', 'packages/corrections/new.ts']);
+      expect(staged.findings()).toEqual([]);
+      rmSync(join(staged.dir, 'packages/corrections/new.ts'));
+      expect(
+        staged.git(['ls-files', '--stage', 'packages/corrections/new.ts']),
+      ).toMatch(/^100644 [0-9a-f]+ 0\tpackages\/corrections\/new\.ts$/);
+      expect(staged.findings()).toEqual([
+        'missing_from_worktree "packages/corrections/new.ts"',
+      ]);
+      const committed = new InventoryRepo();
+      committed.write('packages/corrections/new.ts');
+      committed.write('tooling/attribution/extra.ts');
+      committed.commitAll();
+      expect(committed.findings()).toEqual([]);
+      rmSync(join(committed.dir, 'packages/corrections/new.ts'));
+      rmSync(join(committed.dir, 'tooling/attribution/extra.ts'));
+      expect(committed.findings()).toEqual([
+        'missing_from_worktree "packages/corrections/new.ts"',
+        'missing_from_worktree "tooling/attribution/extra.ts"',
+      ]);
+    },
+  );
+
+  it(
+    'accepts an optional addition removed from both the index and the work tree',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.write('packages/corrections/optional.ts');
+      repo.commitAll();
+      repo.git(['rm', '-q', 'packages/corrections/optional.ts']);
+      expect(repo.findings()).toEqual([]);
+      repo.git(['commit', '-q', '-m', 'remove optional addition']);
+      expect(repo.findings()).toEqual([]);
+    },
+  );
+
+  it(
+    'keeps baseline and authorized-update files required in both the index and the work tree',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      rmSync(join(repo.dir, 'docs/AVEN_PRINCIPLES.md'));
+      rmSync(join(repo.dir, 'README.md'));
+      expect(repo.findings()).toEqual([
+        'missing_from_worktree "README.md"',
+        'missing_from_worktree "docs/AVEN_PRINCIPLES.md"',
+      ]);
+      repo.git([
+        'rm',
+        '-q',
+        '--cached',
+        'docs/AVEN_PRINCIPLES.md',
+        'README.md',
+      ]);
+      expect(repo.findings()).toEqual([
+        'missing_from_index "README.md"',
+        'missing_from_index "docs/AVEN_PRINCIPLES.md"',
+      ]);
+    },
+  );
+
+  it(
+    'reports missing additions beside mode, unrelated and present-file cases deterministically',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.write('packages/corrections/present.ts');
+      repo.write('packages/corrections/gone.ts');
+      repo.commitAll();
+      repo.write('packages/corrections/staged-present.ts');
+      repo.git(['add', 'packages/corrections/staged-present.ts']);
+      rmSync(join(repo.dir, 'packages/corrections/gone.ts'));
+      repo.git([
+        'update-index',
+        '--chmod=+x',
+        'packages/corrections/present.ts',
+      ]);
+      repo.write('unrelated-root.ts');
+      const expected = [
+        'missing_from_worktree "packages/corrections/gone.ts"',
+        'executable_mode "packages/corrections/present.ts"',
+        'unauthorized_addition "unrelated-root.ts"',
+      ];
+      expect(repo.findings()).toEqual(expected);
+      for (let i = 0; i < 3; i += 1) expect(repo.findings()).toEqual(expected);
+    },
+  );
+});
+
+describe('R4-N2 linked ancestors in real temporary Git repositories (POSIX links)', () => {
+  /** Hides a path from untracked enumeration, as Git on Windows does for a junction. */
+  const hideFromUntracked = (repo: InventoryRepo, path: string) =>
+    writeFileSync(join(repo.dir, '.git', 'info', 'exclude'), `/${path}\n`);
+
+  /** Replaces the repository directory `dir` with a link to `target`. */
+  const link = (repo: InventoryRepo, dir: string, target: string) => {
+    rmSync(join(repo.dir, dir), { recursive: true });
+    symlinkSync(target, join(repo.dir, dir), 'dir');
+  };
+
+  /** A copy of the repository directory `dir`'s files at a new location. */
+  const copyOut = (repo: InventoryRepo, dir: string, to: string) => {
+    mkdirSync(to, { recursive: true });
+    for (const name of readdirSync(join(repo.dir, dir)))
+      writeFileSync(join(to, name), readFileSync(join(repo.dir, dir, name)));
+    return to;
+  };
+
+  it(
+    'reports a frozen file under a linked ancestor even when Git lists no untracked ancestor (same content)',
+    R4_TIMEOUT,
+    () => {
+      if (!symlinksAvailable) return; // Documented host limitation.
+      const repo = new InventoryRepo();
+      const outside = copyOut(
+        repo,
+        'packages/contracts/src',
+        join(r4Scratch, `outside-${++r4Counter}`),
+      );
+      link(repo, 'packages/contracts/src', outside);
+      hideFromUntracked(repo, 'packages/contracts/src');
+      expect(repo.git(['ls-files', '--others', '--exclude-standard'])).toBe('');
+      expect(
+        repo.git(['ls-files', '--stage', 'packages/contracts/src/index.ts']),
+      ).toMatch(/^100644 /);
+      expect(repo.findings()).toEqual([
+        'linked_ancestor "packages/contracts/src/index.ts"',
+      ]);
+      // Without the hiding rule (Linux Git lists the link itself), too.
+      rmSync(join(repo.dir, '.git', 'info', 'exclude'));
+      expect(repo.findings()).toEqual([
+        'unauthorized_addition "packages/contracts/src"',
+        'symbolic_link "packages/contracts/src"',
+        'linked_ancestor "packages/contracts/src/index.ts"',
+      ]);
+    },
+  );
+
+  it(
+    'reports an authorized addition under a linked ancestor (different content)',
+    R4_TIMEOUT,
+    () => {
+      if (!symlinksAvailable) return;
+      const repo = new InventoryRepo();
+      repo.write('packages/corrections/deep/file.ts', 'reviewed\n');
+      repo.commitAll();
+      const outside = join(r4Scratch, `outside-${++r4Counter}`);
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'file.ts'), 'unreviewed\n');
+      link(repo, 'packages/corrections/deep', outside);
+      hideFromUntracked(repo, 'packages/corrections/deep');
+      expect(repo.findings()).toEqual([
+        'linked_ancestor "packages/corrections/deep/file.ts"',
+      ]);
+    },
+  );
+
+  it(
+    'reports a linked ancestor that points inside the repository, and links several levels deep',
+    R4_TIMEOUT,
+    () => {
+      if (!symlinksAvailable) return;
+      const inside = new InventoryRepo();
+      inside.write(
+        'packages/corrections/mirror/source.txt',
+        'docs/sources/source.txt\n',
+      );
+      inside.commitAll();
+      link(
+        inside,
+        'docs/sources',
+        join(inside.dir, 'packages/corrections/mirror'),
+      );
+      hideFromUntracked(inside, 'docs/sources');
+      expect(inside.findings()).toEqual([
+        'linked_ancestor "docs/sources/source.txt"',
+      ]);
+
+      const deep = new InventoryRepo();
+      const outer = join(r4Scratch, `outside-${++r4Counter}`);
+      const inner = join(r4Scratch, `outside-${++r4Counter}`);
+      copyOut(deep, 'tooling/tests', inner);
+      mkdirSync(outer);
+      symlinkSync(inner, join(outer, 'tests'), 'dir');
+      link(deep, 'tooling', outer);
+      hideFromUntracked(deep, 'tooling');
+      expect(deep.findings()).toEqual([
+        'linked_ancestor "tooling/tests/frozen.test.ts"',
+      ]);
+    },
+  );
+
+  it(
+    'keeps a linked Git worktree (its .git pointer file) free of linked-ancestor findings',
+    R4_TIMEOUT,
+    () => {
+      const repo = new InventoryRepo();
+      repo.write('packages/corrections/deep/nested/file.ts');
+      repo.commitAll();
+      const linked = join(r4Scratch, `worktree-${++r4Counter}`);
+      repo.git(['worktree', 'add', '-q', '--detach', linked]);
+      expect(lstatSync(join(linked, '.git')).isFile()).toBe(true);
+      expect(repositoryFindings(linked, SYNTHETIC_POLICY)).toEqual([]);
     },
   );
 });
