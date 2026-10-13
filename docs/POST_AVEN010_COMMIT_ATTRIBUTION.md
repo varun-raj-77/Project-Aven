@@ -7,9 +7,14 @@ unchanged. This document supersedes the AVEN-010-specific D11 authorship choice
 
 ## Required identity for new Aven commits
 
-- Primary **author**: `Varun Karthik <varunraj2117@gmail.com>` (the GitHub login
-  display name `varun-raj-77` with the same verified email is also acceptable).
-- **Committer**: that same owner email and an accepted owner display name.
+- Primary **author**: `Varun Karthik` or `varun-raj-77`, with either the
+  owner's verified `varunraj2117@gmail.com` email or GitHub's authenticated
+  account-linked `71327884+varun-raj-77@users.noreply.github.com` address.
+  GitHub's Contents API uses the latter by default; the API independently
+  resolved both author and committer of the first two maintenance commits to
+  GitHub user `varun-raj-77`.
+- **Committer**: the same owner account identity (one of those two accepted
+  names and one of those two recognized emails).
 - AI assistance must remain transparent: for commits assisted by Claude, append
   exactly one valid Git trailer:
   `Co-authored-by: Claude <noreply@anthropic.com>`.
@@ -47,13 +52,19 @@ AVEN-010-era gate and the new post-freeze gate:
 git show -s --format=fuller HEAD
 git log -1 --format=%B HEAD
 pnpm attribution:check
-node tooling/attribution/check-post-aven010.mjs
+pnpm attribution:self-test
 ```
 
 Stop if any check fails; repair only an **unpushed** candidate and re-review.
 For a merge of this policy candidate, preserve individual commits and do not
 alter the `aven-010` tag. AVEN-011 implementation remains unauthorized until
 the owner explicitly begins that milestone.
+
+`pnpm attribution:check` is the new combined gate: it preserves the immutable
+AVEN-009-to-010 audit using the old evaluator, then checks all post-freeze
+commits under the new policy. The old AVEN-010 CLI remains in the repository
+for historical reproducibility; do not use it on new branch HEADs because its
+frozen email policy intentionally rejects GitHub's authenticated noreply alias.
 
 The post-freeze gate enforces owner author/committer identity and a Claude
 co-author trailer for the policy/AI-assisted series; if owner-only commits
