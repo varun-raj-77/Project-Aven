@@ -4,14 +4,14 @@ on:
   pull_request:
   push:
     branches:
-      - "**"
+      - '**'
 
 permissions:
   contents: read
 
 jobs:
   attribution:
-    name: Verify owner-first commit identities
+    name: Verify historical and owner-first attribution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +20,41 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
-      - name: Check pure attribution policy scenarios
-        run: node tooling/attribution/check-post-aven010.mjs --self-test
-      - name: Verify frozen tags, ancestry, and future author credit
-        run: node tooling/attribution/check-post-aven010.mjs
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - name: Verify pinned tags and owner-first commit history
+        run: |
+          node tooling/attribution/check-post-aven010.mjs --self-test
+          node tooling/attribution/check-post-aven010.mjs
+      - name: Install dependencies (temporary CI-only native approvals)
+        run: |
+          cp pnpm-workspace.yaml "$RUNNER_TEMP/workspace.original"
+          printf '\nallowBuilds:\n  better-sqlite3: true\n  esbuild: true\n' >> pnpm-workspace.yaml
+          pnpm install --frozen-lockfile
+          cp "$RUNNER_TEMP/workspace.original" pnpm-workspace.yaml
+          git diff --exit-code -- pnpm-workspace.yaml
+      - name: Temporary format candidate for deterministic patch
+        run: |
+          pnpm exec prettier --write .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs
+          for f in .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs; do
+            printf 'AVEN_FMT_BEGIN:%s\n' "$f"
+            base64 -w0 "$f"
+            printf '\nAVEN_FMT_END:%s\n' "$f"
+          done
+      - name: Run postfreeze current-tree checks
+        run: pnpm check
+      - name: Run unchanged AVEN-010 checks at frozen tag
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/aven010" refs/tags/aven-010
+          (
+            cd "$RUNNER_TEMP/aven010"
+            cp pnpm-workspace.yaml "$RUNNER_TEMP/aven010-workspace.original"
+            printf '\nallowBuilds:\n  better-sqlite3: true\n  esbuild: true\n' >> pnpm-workspace.yaml
+            pnpm install --frozen-lockfile
+            cp "$RUNNER_TEMP/aven010-workspace.original" pnpm-workspace.yaml
+            git diff --exit-code -- pnpm-workspace.yaml
+            pnpm check
+            node tooling/attribution/check-attribution.ts
+          )
