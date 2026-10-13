@@ -1,14 +1,14 @@
 # Post-AVEN-010 owner-first commit attribution
 
 Status: owner-authorized attribution-policy maintenance candidate; not part of
-AVEN-010 or AVEN-011. The frozen `aven-010` tag and all earlier commit IDs remain
-unchanged. This document supersedes the AVEN-010-specific D11 authorship choice
-**only for commits after** `76535d8647ee36e56bd2efd1a86642d1fc572ee7`.
+AVEN-010 or AVEN-011. The frozen `aven-010` tag and all earlier commit IDs
+remain unchanged. This document supersedes the AVEN-010-specific D11 authorship
+choice **only for commits after** `76535d8647ee36e56bd2efd1a86642d1fc572ee7`.
 
 ## Required identity for new Aven commits
 
-- Primary **author**: `Varun Karthik` or `varun-raj-77`, with either the
-  owner's verified `varunraj2117@gmail.com` email or GitHub's authenticated
+- Primary **author**: `Varun Karthik` or `varun-raj-77`, with either the owner's
+  verified `varunraj2117@gmail.com` email or GitHub's authenticated
   account-linked `71327884+varun-raj-77@users.noreply.github.com` address.
   GitHub's Contents API uses the latter by default; the API independently
   resolved both author and committer of the first two maintenance commits to
@@ -18,9 +18,9 @@ unchanged. This document supersedes the AVEN-010-specific D11 authorship choice
 - AI assistance must remain transparent: for commits assisted by Claude, append
   exactly one valid Git trailer:
   `Co-authored-by: Claude <noreply@anthropic.com>`.
-- Never attribute a commit to the owner without the owner's authorization
-  and review; do not use an owner identity for changes made independently
-  without their direction.
+- Never attribute a commit to the owner without the owner's authorization and
+  review; do not use an owner identity for changes made independently without
+  their direction.
 - Keep every patch as a separate, linear, inspectable commit; no squash, rebase,
   force-push, synthetic activity, or rewriting frozen milestone tags.
 - A valid Git commit is **not** proof the GitHub contribution graph has updated.
@@ -57,16 +57,16 @@ pnpm attribution:self-test
 
 Stop if any check fails; repair only an **unpushed** candidate and re-review.
 For a merge of this policy candidate, preserve individual commits and do not
-alter the `aven-010` tag. AVEN-011 implementation remains unauthorized until
-the owner explicitly begins that milestone.
+alter the `aven-010` tag. AVEN-011 implementation remains unauthorized until the
+owner explicitly begins that milestone.
 
 `pnpm attribution:check` is the new combined gate: it preserves the immutable
 AVEN-009-to-010 audit using the old evaluator, then checks all post-freeze
-commits under the new policy. The old AVEN-010 CLI remains in the repository
-for historical reproducibility; do not use it on new branch HEADs because its
-frozen email policy intentionally rejects GitHub's authenticated noreply alias.
+commits under the new policy. The old AVEN-010 CLI remains in the repository for
+historical reproducibility; do not use it on new branch HEADs because its frozen
+email policy intentionally rejects GitHub's authenticated noreply alias.
 
 The post-freeze gate enforces owner author/committer identity and a Claude
-co-author trailer for the policy/AI-assisted series; if owner-only commits
-are later needed, propose an independently tested, explicitly authorized
-versioned exception first. Do not silently relax the check.
+co-author trailer for the policy/AI-assisted series; if owner-only commits are
+later needed, propose an independently tested, explicitly authorized versioned
+exception first. Do not silently relax the check.
