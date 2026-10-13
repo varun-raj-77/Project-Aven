@@ -13,6 +13,17 @@ import { evaluateCommit } from './attribution.ts';
 
 const V9 = '80057a217adb90132c5b6bc1c6a5c0f798db08c5';
 const V10 = '76535d8647ee36e56bd2efd1a86642d1fc572ee7';
+const TAG_OBJECTS = Object.freeze({
+  'aven-009': 'adb32a0be958cd03be6af7534438fe37cd5af6ec',
+  'aven-010': '4ef575c28f78504e77db8bb7d39df1ba8eda5041',
+});
+const MAINTENANCE_DELTA = Object.freeze({
+  '.github/workflows/owner-first-attribution.yml': 'A',
+  'AGENTS.md': 'M',
+  'docs/POST_AVEN010_COMMIT_ATTRIBUTION.md': 'A',
+  'package.json': 'M',
+  'tooling/attribution/check-post-aven010.mjs': 'A',
+});
 const OWNER_NAMES = new Set(['Varun Karthik', 'varun-raj-77']);
 const OWNER_EMAILS = new Set([
   'varunraj2117@gmail.com',
@@ -85,6 +96,8 @@ function requireTag(name, sha) {
     throw new Error(name + ' moved from its frozen commit');
   if (git(['cat-file', '-t', 'refs/tags/' + name]) !== 'tag')
     throw new Error(name + ' is not annotated');
+  if (git(['rev-parse', '--verify', 'refs/tags/' + name]) !== TAG_OBJECTS[name])
+    throw new Error(name + ' annotated tag object was replaced');
 }
 
 function verify() {
@@ -122,6 +135,16 @@ function verify() {
   }
   if (countFrozen !== 16 || previous !== head)
     errors.push('History is not a complete linear extension of AVEN-010');
+
+  // This post-freeze maintenance may change only the enumerated metadata,
+  // scripts, policy and CI files. All historical runtime, evaluation and
+  // frozen test files must stay byte-identical to the AVEN-010 tag.
+  const diff = git(['diff', '--name-status', '--no-renames', V10, head]);
+  for (const line of diff.split('\n').filter(Boolean)) {
+    const match = /^([A-Z])\t(.+)$/.exec(line);
+    if (!match || MAINTENANCE_DELTA[match[2]] !== match[1])
+      errors.push('Unapproved post-freeze file delta: ' + line);
+  }
   return { head, countFrozen, countNew, errors };
 }
 
