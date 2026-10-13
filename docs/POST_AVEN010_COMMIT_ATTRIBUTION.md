@@ -72,8 +72,9 @@ AVEN-010's repository-layout and attribution tests deliberately assert exact
 historical filenames and package scripts. Those tests remain **byte-identical**
 and are run from an isolated checkout at annotated tag `aven-010`, using its
 original complete `check` command (including all 1,899 tests at that tag).
-Future-checkout `pnpm test` excludes only five historically scoped test files:
+Future-checkout `pnpm test` excludes only six historically scoped test files:
 `packages/corrections/test/frozen-layers.test.ts`,
+`packages/corrections/test/boundaries.test.ts`,
 `tooling/tests/repository-maintenance.test.ts`,
 `tooling/tests/aven-008-frozen-layers.test.ts`,
 `tooling/tests/aven-009-frozen-layers.test.ts`, and
