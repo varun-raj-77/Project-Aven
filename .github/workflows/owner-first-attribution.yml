@@ -35,11 +35,9 @@ jobs:
           cp pnpm-workspace.yaml "$RUNNER_TEMP/workspace.original"
           printf '\nallowBuilds:\n  better-sqlite3: true\n  esbuild: true\n' >> pnpm-workspace.yaml
           pnpm install --frozen-lockfile
-          cp "$RUNNER_TEMP/workspace.original" pnpm-workspace.yaml
-          git diff --exit-code -- pnpm-workspace.yaml
       - name: Temporary format candidate for deterministic patch
         run: |
-          pnpm exec prettier --write .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs
+          ./node_modules/.bin/prettier --write .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs
           for f in .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs; do
             printf 'AVEN_FMT_BEGIN:%s\n' "$f"
             base64 -w0 "$f"
@@ -47,6 +45,10 @@ jobs:
           done
       - name: Run postfreeze current-tree checks
         run: pnpm check
+      - name: Restore original workspace configuration
+        run: |
+          cp "$RUNNER_TEMP/workspace.original" pnpm-workspace.yaml
+          git diff --exit-code -- pnpm-workspace.yaml
       - name: Run unchanged AVEN-010 checks at frozen tag
         run: |
           git worktree add --detach "$RUNNER_TEMP/aven010" refs/tags/aven-010
@@ -57,6 +59,7 @@ jobs:
             pnpm install --frozen-lockfile
             cp "$RUNNER_TEMP/aven010-workspace.original" pnpm-workspace.yaml
             git diff --exit-code -- pnpm-workspace.yaml
-            pnpm check
+            export PATH="$PWD/node_modules/.bin:$PATH"
+            bash -e -c "$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json','utf8')).scripts.check\")"
             node tooling/attribution/check-attribution.ts
           )
