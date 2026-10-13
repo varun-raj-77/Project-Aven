@@ -1,0 +1,61 @@
+# Post-AVEN-010 owner-first commit attribution
+
+Status: owner-authorized attribution-policy maintenance candidate; not part of
+AVEN-010 or AVEN-011. The frozen `aven-010` tag and all earlier commit IDs remain
+unchanged. This document supersedes the AVEN-010-specific D11 authorship choice
+**only for commits after** `76535d8647ee36e56bd2efd1a86642d1fc572ee7`.
+
+## Required identity for new Aven commits
+
+- Primary **author**: `Varun Karthik <varunraj2117@gmail.com>` (the GitHub login
+  display name `varun-raj-77` with the same verified email is also acceptable).
+- **Committer**: that same owner email and an accepted owner display name.
+- AI assistance must remain transparent: for commits assisted by Claude, append
+  exactly one valid Git trailer:
+  `Co-authored-by: Claude <noreply@anthropic.com>`.
+- Never attribute a commit to the owner without the owner's authorization
+  and review; do not use an owner identity for changes made independently
+  without their direction.
+- Keep every patch as a separate, linear, inspectable commit; no squash, rebase,
+  force-push, synthetic activity, or rewriting frozen milestone tags.
+- A valid Git commit is **not** proof the GitHub contribution graph has updated.
+  Verify the GitHub API author/committer mapping after the first commit, and
+  verify profile counting separately when GitHub has indexed the activity.
+
+## Operator preflight before any future commit
+
+On the checkout used to create the commit, verify the repository-local identity:
+
+```powershell
+git config --local user.name "Varun Karthik"
+git config --local user.email "varunraj2117@gmail.com"
+git config --local --get user.name
+git config --local --get user.email
+```
+
+For each Claude-assisted commit, put this trailer in the **final trailer block**
+of the commit message:
+
+```text
+Co-authored-by: Claude <noreply@anthropic.com>
+```
+
+Before pushing, inspect the resulting commit and run both the immutable
+AVEN-010-era gate and the new post-freeze gate:
+
+```powershell
+git show -s --format=fuller HEAD
+git log -1 --format=%B HEAD
+pnpm attribution:check
+node tooling/attribution/check-post-aven010.mjs
+```
+
+Stop if any check fails; repair only an **unpushed** candidate and re-review.
+For a merge of this policy candidate, preserve individual commits and do not
+alter the `aven-010` tag. AVEN-011 implementation remains unauthorized until
+the owner explicitly begins that milestone.
+
+The post-freeze gate enforces owner author/committer identity and a Claude
+co-author trailer for the policy/AI-assisted series; if owner-only commits
+are later needed, propose an independently tested, explicitly authorized
+versioned exception first. Do not silently relax the check.
