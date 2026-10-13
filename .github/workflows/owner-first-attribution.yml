@@ -1,0 +1,27 @@
+name: Owner-first attribution
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    name: Verify owner-first commit identities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check pure attribution policy scenarios
+        run: node tooling/attribution/check-post-aven010.mjs --self-test
+      - name: Verify frozen tags, ancestry, and future author credit
+        run: node tooling/attribution/check-post-aven010.mjs
