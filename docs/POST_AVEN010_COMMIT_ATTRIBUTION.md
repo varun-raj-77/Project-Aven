@@ -66,6 +66,33 @@ commits under the new policy. The old AVEN-010 CLI remains in the repository for
 historical reproducibility; do not use it on new branch HEADs because its frozen
 email policy intentionally rejects GitHub's authenticated noreply alias.
 
+## Frozen tests versus future tests
+
+AVEN-010's repository-layout and attribution tests deliberately assert exact
+historical filenames and package scripts. Those tests remain **byte-identical**
+and are run from an isolated checkout at annotated tag `aven-010`, using its
+original complete `check` command (including all 1,899 tests at that tag).
+Future-checkout `pnpm test` excludes only five historically scoped test files:
+`packages/corrections/test/frozen-layers.test.ts`,
+`tooling/tests/repository-maintenance.test.ts`,
+`tooling/tests/aven-008-frozen-layers.test.ts`,
+`tooling/tests/aven-009-frozen-layers.test.ts`, and
+`tooling/attribution/attribution.test.ts`.
+Every other existing functional test runs against the new checkout.
+
+The successor gate separately verifies exact annotated tag objects, complete
+linear AVEN-009-to-010 attribution, owner-first commits after the tag, and a
+narrow exact file/change-type allowlist against the AVEN-010 tree. Its allowlist
+must be versioned and independently reviewed before future milestones change
+additional files. Changes to runtime, Ledger, Root, evaluations, and frozen
+source are **not** allowed by this maintenance candidate.
+
+`pnpm check` retains the MAINT-001 composition of format-check, typecheck,
+experiment-check and current-checkout tests. `pnpm attribution:check` is the
+separate mandatory postfreeze history gate. CI runs both checks and the
+historical full-suite check from the original tag; no historical assertions
+are deleted or weakened.
+
 The post-freeze gate enforces owner author/committer identity and a Claude
 co-author trailer for the policy/AI-assisted series; if owner-only commits are
 later needed, propose an independently tested, explicitly authorized versioned
