@@ -13,8 +13,6 @@ jobs:
   attribution:
     name: Verify historical and owner-first attribution
     runs-on: ubuntu-latest
-    env:
-      pnpm_config_verifyDepsBeforeRun: 'false'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,12 +41,15 @@ jobs:
             base64 -w0 "$f"
             printf '\nAVEN_FMT_END:%s\n' "$f"
           done
-      - name: Run postfreeze current-tree checks
-        run: pnpm check
       - name: Restore original workspace configuration
         run: |
           cp "$RUNNER_TEMP/workspace.original" pnpm-workspace.yaml
           git diff --exit-code -- pnpm-workspace.yaml
+      - name: Run postfreeze current-tree checks
+        run: |
+          export PATH="$PWD/node_modules/.bin:$PATH"
+          bash -e -c "$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).scripts.check)')"
+          node tooling/attribution/check-post-aven010.mjs
       - name: Run unchanged AVEN-010 checks at frozen tag
         run: |
           git worktree add --detach "$RUNNER_TEMP/aven010" refs/tags/aven-010
