@@ -13,6 +13,8 @@ jobs:
   attribution:
     name: Verify historical and owner-first attribution
     runs-on: ubuntu-latest
+    env:
+      pnpm_config_verifyDepsBeforeRun: 'false'
     steps:
       - uses: actions/checkout@v4
         with:
