@@ -60,6 +60,6 @@ jobs:
             cp "$RUNNER_TEMP/aven010-workspace.original" pnpm-workspace.yaml
             git diff --exit-code -- pnpm-workspace.yaml
             export PATH="$PWD/node_modules/.bin:$PATH"
-            bash -e -c "$(node -p \"JSON.parse(require('node:fs').readFileSync('package.json','utf8')).scripts.check\")"
+            bash -e -c "$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).scripts.check)')"
             node tooling/attribution/check-attribution.ts
           )
