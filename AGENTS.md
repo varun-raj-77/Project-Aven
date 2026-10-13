@@ -44,21 +44,33 @@ records the invariants.
 
 Accepted design (independent review): one new package, `packages/corrections`
 (`@aven/corrections`); every frozen layer stays byte-identical. Patches, each a
-single reviewed commit:
+single reviewed commit; corrective commits after review or audit findings are
+separate commits, recorded in `docs/AVEN_010_REPORT.md` (section D):
 
 1. Reconciliation of `AGENTS.md`, `docs/ROADMAP.md` and `README.md`, and the
    commit attribution gate (`tooling/attribution/`, `pnpm attribution:check`).
-   **Current patch.**
+   Accepted (`19bc92b`).
 2. Package scaffold, fixed errors, and the AVEN-010 frozen-layer tripwire inside
    the package (the AVEN-009 tripwire forbids additions to `tooling/tests`).
+   Accepted (`9da05c7`).
 3. Correction recorder: the only AVEN-010 write, one atomic Ledger
-   `owner_correction` append through the frozen Ledger and storage.
-4. Pure immediate-override resolver.
-5. Read-only Ledger correction history and correction-evidence index.
+   `owner_correction` append through the frozen Ledger and storage. Accepted
+   (`c9f4d41`).
+4. Pure immediate-override resolver. Accepted (`9c284c0`, review correction
+   `8de38fd`; audit remediations R1-R4 `2a06705`, `2e91eeb`, `7c92380`,
+   `64c90ce` and follow-up `1a5f8e4`).
+5. Read-only Ledger correction history and correction-evidence index. Accepted
+   (`63fae84`).
 6. Context Broker integration: current-instruction source, exact-target
-   suppression wrapper and exposure verification.
-7. Cross-layer adversarial, restart, mutation and performance campaign.
-8. AVEN-010 report and documentation.
+   suppression wrapper and exposure verification. Accepted at `0593d44`
+   (candidate `9ccfdf3`, audit remediation `0d8753b` for F1-F4, follow-up
+   `0593d44` for N1 and N2).
+7. Cross-layer adversarial, restart, mutation and performance campaign. Accepted
+   with non-blocking notes (`69c5c0a`).
+8. AVEN-010 report and documentation. **Current patch: the
+   implementation-complete candidate, pending independent final review.**
+   AVEN-010 is not merged and not tagged, `main` remains at AVEN-009, and
+   freezing it requires separate explicit authorization after that review.
 
 Accepted decisions:
 
@@ -169,10 +181,12 @@ Consequences:
   boundary, the model-runtime boundary and model-output recording path, the
   AVEN-007 A/B baselines and dataset integrity, the AVEN-008 Context Broker's
   selection mechanics, the AVEN-009 owner-model intake, lineage,
-  lifecycle-claim, view, rebuild and context-source mechanics, and the AVEN-010
-  commit attribution rules on synthetic Git repositories, all on synthetic data,
-  not a complete Aven runtime. Run `pnpm attribution:check` before every push.
-  Report limitations honestly.
+  lifecycle-claim, view, rebuild and context-source mechanics, the AVEN-010
+  commit attribution rules on synthetic Git repositories, and the AVEN-010
+  correction recorder, history reader, evidence index, resolver and Broker
+  integration (including a cross-layer campaign on file-backed SQLite), all on
+  synthetic data, not a complete Aven runtime. Run `pnpm attribution:check`
+  before every push. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
   of Git. Commit sanitized reproducibility artifacts only after checking their
   contents.
@@ -272,10 +286,26 @@ ordinal configuration `aven-009-owner-model-source-config-v1` (negativeRetrieval
 always 0); changing it requires a new version and evidence. Package and subpath
 separation is not process or security isolation. `tooling/attribution` holds the
 AVEN-010 commit attribution gate (`pnpm attribution:check`); it reads commit
-metadata and is not security. Other app/package directories remain placeholders.
-Tooling schemas still describe experimental metadata only. No correction
-recording, override resolution or correction context source exists yet; they
-arrive only in later authorized AVEN-010 patches. No live provider adapter or
+metadata and is not security. `packages/corrections` (`@aven/corrections`,
+version `aven-010-corrections-v1`; see its README and `docs/AVEN_010_REPORT.md`)
+holds AVEN-010. Its pure root entry exports the fixed `CorrectionError` and
+`resolveImmediateCorrections` (immediate applicability, explicit supersession,
+overlaps and exact suppression targets at an explicit `referenceTime` and
+sequence boundary). The `./ledger` subpath holds `recordOwnerCorrection`, the
+only AVEN-010 write (one frozen Ledger append), and the read-only
+`readCorrectionHistory` and `buildCorrectionEvidenceIndex`. The
+`./context-source` subpath holds `assembleWithCorrections`, which offers active
+corrections to the unchanged Broker as `current_instruction` candidates,
+suppresses only exact targets and returns `not_exposed` unless every instruction
+is in the selected bundle. Permission corrections are deferred to Root. An
+immediate override is transient task context, not owner memory, a trusted
+preference or Root approval; the package learns nothing, writes no owner state
+and is not wired into the API. Its synthetic benchmarks
+(`packages/corrections/bench`) are diagnostic only. The inherited native-memory
+risk of large synchronous storage batches needs a separate resource-readiness
+gate before bulk ingestion or long-lived deployment; no maintenance of frozen
+layers is authorized. Other app/package directories remain placeholders. Tooling
+schemas still describe experimental metadata only. No live provider adapter or
 network model call, Strands or other framework adapter, public generation route,
 durable owner-state writer, learning algorithms, correction interpretation from
 free text, learned negative-signal generation, routing, streaming, tool calling,

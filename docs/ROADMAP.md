@@ -15,7 +15,7 @@ The eight-week outline is a planning reference, not a delivery promise.
 | AVEN-007 | Naive Personalized baseline and prebuilt eval dataset | Frozen at `aven-007`; A/B baselines, dataset v2 (48 dev / 16 held-out); `not_run`                      |
 | AVEN-008 | Context Broker                                        | Frozen at `aven-008` (`4ea1bc5`); config v2 after independent review; transient candidates only        |
 | AVEN-009 | Typed Owner Model                                     | Frozen at `aven-009` (`80057a2`); read-only typed owner state, lineage, views, rebuild, Broker sources |
-| AVEN-010 | Correction events and immediate session override      | In progress (isolated branch); linked correction, immediate override, durable candidate separation     |
+| AVEN-010 | Correction events and immediate session override      | Implementation complete on isolated candidate branch; Patch 8 pending independent final review         |
 | AVEN-011 | Action Proposal schema                                | Pending; typed request distinct from permission                                                        |
 | AVEN-012 | Root Policy Gateway                                   | Pending; external ALLOW/DENY/REQUIRE_OWNER_APPROVAL                                                    |
 | AVEN-013 | One sandbox tool and verifier                         | Pending; bounded action and observed outcome                                                           |
@@ -36,13 +36,22 @@ review and Windows validation (runner options
 [the AVEN-009 report](AVEN_009_REPORT.md), which keeps its pre-freeze status
 header and pre-attribution commit SHAs as historical record. SHAs such as
 `4174080` cited in frozen documents refer to the archived pre-attribution
-history. Current authorization covers AVEN-010 only, patch by patch on an
-isolated branch (working plan and accepted decisions in `AGENTS.md`); it is not
-merged, not tagged and not frozen. AVEN-011 and later remain unauthorized and
-not started. No milestone so far adds a live-model adapter, runs the frozen A/B
-baselines against a real model or makes a C-versus-B claim; a later, explicitly
-authorized step may add the first justified adapter behind the AVEN-006
-interface.
+history. Current authorization covers AVEN-010 only, patch by patch on the
+isolated branch `claude/adoring-pasteur-hcc5oe` (working plan and accepted
+decisions in `AGENTS.md`). Patches 1-7 and their remediation commits were
+independently accepted; Patch 8 (the [AVEN-010 report](AVEN_010_REPORT.md) and
+status reconciliation) is pending independent final review. AVEN-010 is not
+merged and not tagged: no `aven-010` tag exists, `main` remains at AVEN-009, and
+freezing requires separate explicit authorization after that review. AVEN-010
+records explicit corrections and applies immediate task and session overrides
+only; it adds no learning, durable owner state or permission decision. Its
+inherited native-memory resource risk under large synchronous storage batches
+(report section Q) requires a separate resource-readiness gate before
+unrestricted bulk ingestion or long-lived v0.1 deployment. AVEN-011 and later
+remain unauthorized and not started. No milestone so far adds a live-model
+adapter, runs the frozen A/B baselines against a real model or makes a
+C-versus-B claim; a later, explicitly authorized step may add the first
+justified adapter behind the AVEN-006 interface.
 
 ## Longer-term gates, all deferred
 

@@ -5,11 +5,12 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-010 Correction Events and Immediate Session Overrides, in
-progress patch by patch on an isolated branch over frozen AVEN-009 (`80057a2`,
-tag `aven-009`); not merged, not tagged, not frozen. Patch 1 reconciles the
-status documents and adds the commit attribution gate; no correction behavior
-exists yet.** The [contracts package](packages/contracts/README.md) defines
+**Current scope: AVEN-010 Correction Events and Immediate Session Overrides,
+implementation complete on the isolated candidate branch
+`claude/adoring-pasteur-hcc5oe` over frozen AVEN-009 (`80057a2`, tag
+`aven-009`); Patch 8 (final report and documentation) is pending independent
+final review. AVEN-010 is not merged, not tagged and not frozen; `main` remains
+at AVEN-009.** The [contracts package](packages/contracts/README.md) defines
 schemas and types; the [storage package](packages/storage/README.md) provides
 local SQLite schema, integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
@@ -42,9 +43,26 @@ read-only rebuild from stored snapshots plus owner-bound Ledger history, and a
 read-only source adapter that offers that state to the unchanged Context Broker
 under a frozen provisional configuration. It writes no owner state, learns
 nothing, interprets no correction and decides no authority; see the
-[AVEN-009 report](docs/AVEN_009_REPORT.md), frozen at tag `aven-009`. There is
-no web app, owner-state writer, learning engine, scorer, authentication, or Root
-gateway, and no correction recorder or override yet. EXP-001 has not been run.
+[AVEN-009 report](docs/AVEN_009_REPORT.md), frozen at tag `aven-009`.
+
+The [corrections package](packages/corrections/README.md) adds AVEN-010: an
+in-process recorder that appends one explicit, structured owner correction
+(original behavior, corrected instruction, provenance) to the Ledger; a
+read-only correction history and evidence index; a pure resolver of immediate
+current-task, current-session and origin-task overrides with explicit
+supersession only; and Context Broker integration that offers active corrections
+as current owner instructions, suppresses only exact corrected targets and
+reports `not_exposed` unless every instruction was actually selected. Permission
+corrections are recorded and deferred to Root. See the
+[AVEN-010 report](docs/AVEN_010_REPORT.md).
+
+**What the repository still does not have:** a live model provider or network
+model call; a general conversational agent (no HTTP route generates a response);
+a learning loop or any durable automatic learning from corrections; an
+owner-state writer; an authenticated owner identity or Root gateway; permission
+decisions; tool execution; a scorer; a web app; any completed v0.1 experiment or
+demonstrated C-versus-B advantage. EXP-001 has not been run. This is a research
+codebase, not a finished personal AI assistant.
 
 ## Start here
 
@@ -81,10 +99,10 @@ invoke a nested `pnpm`.
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
 repository tooling, contracts, storage, Ledger, runtime, baseline, Context
-Broker, owner model, and the API app, including compile-time API checks. Tests
-validate contract boundaries, SQLite and Ledger integrity, experiment metadata,
-and freeze gates; passing them is not evidence of learning quality or runtime
-security.
+Broker, owner model, corrections, and the API app, including compile-time API
+checks. Tests validate contract boundaries, SQLite and Ledger integrity,
+experiment metadata, and freeze gates; passing them is not evidence of learning
+quality or runtime security.
 
 Dependencies are pinned and locked. Strict TypeScript, Zod metadata validation,
 Prettier, YAML parsing, and Vitest are available at the root. The contracts
@@ -95,6 +113,7 @@ database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
 `pnpm --filter @aven/baseline test` runs baseline tests;
 `pnpm --filter @aven/context-broker test` runs Context Broker tests;
 `pnpm --filter @aven/owner-model test` runs owner-model tests;
+`pnpm --filter @aven/corrections test` runs correction tests;
 `pnpm dataset:check` validates the frozen AVEN-007 dataset against its manifest.
 `pnpm attribution:check` checks that every commit after the frozen `aven-009`
 baseline keeps Claude as primary author and carries the owner's exact co-author
@@ -125,15 +144,15 @@ aven/
                  web (placeholder)
   packages/      contracts, storage, ledger, runtime (AVEN-006), baseline
                  (AVEN-007), context-broker (AVEN-008), owner-model
-                 (AVEN-009); root, learning, eval, test-utils
-                 (placeholders)
+                 (AVEN-009), corrections (AVEN-010); root, learning, eval,
+                 test-utils (placeholders)
   tooling/       scripts, bootstrap tests and the AVEN-010 attribution gate
 ```
 
 `packages/contracts`, `packages/storage`, `packages/ledger`, `packages/runtime`,
-`packages/baseline`, `packages/context-broker`, `packages/owner-model`, and
-`apps/api` are private workspace packages. Other app/package directories remain
-placeholders containing `.gitkeep` only.
+`packages/baseline`, `packages/context-broker`, `packages/owner-model`,
+`packages/corrections`, and `apps/api` are private workspace packages. Other
+app/package directories remain placeholders containing `.gitkeep` only.
 
 ## Experiment and authority
 
@@ -168,8 +187,11 @@ correction handling, promotion or permission decision. AVEN-009 is frozen at tag
 `aven-009`; the corrected AVEN-008 anchor is `4ea1bc5`, and SHAs such as
 `4174080` cited in frozen documents refer to the archived pre-attribution
 history. AVEN-010 adds explicit correction recording and immediate
-current-task/current-session overrides, separate from durable learning; it is in
-progress on an isolated branch, and AVEN-011 and later work remain deferred and
+current-task/current-session overrides, separate from durable learning: an
+immediate override is transient task context, never owner memory, a trusted
+preference or Root approval. It is implementation complete on an isolated
+candidate branch, pending independent final review of Patch 8 and a separately
+authorized merge and `aven-010` tag; AVEN-011 and later work remain deferred and
 not started. The AVEN-001 source summaries and experiment documents retain their
 historical milestone context; the current authorization is recorded in
 `AGENTS.md`.
