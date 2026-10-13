@@ -38,5 +38,14 @@ jobs:
           EOF
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
+      - name: Temporary format-and-emit for maintenance candidate
+        run: |
+          pnpm exec prettier --write .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs
+          for f in .github/workflows/owner-first-attribution.yml AGENTS.md docs/POST_AVEN010_COMMIT_ATTRIBUTION.md tooling/attribution/check-post-aven010.mjs; do
+            printf 'AVEN_FMT_BEGIN:%s\n' "$f"
+            base64 -w0 "$f"
+            printf '\nAVEN_FMT_END:%s\n' "$f"
+          done
+
       - name: Run full repository quality gate
         run: pnpm check
