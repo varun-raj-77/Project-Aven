@@ -78,8 +78,8 @@ Future-checkout `pnpm test` excludes only six historically scoped test files:
 `tooling/tests/repository-maintenance.test.ts`,
 `tooling/tests/aven-008-frozen-layers.test.ts`,
 `tooling/tests/aven-009-frozen-layers.test.ts`, and
-`tooling/attribution/attribution.test.ts`.
-Every other existing functional test runs against the new checkout.
+`tooling/attribution/attribution.test.ts`. Every other existing functional test
+runs against the new checkout.
 
 The successor gate separately verifies exact annotated tag objects, complete
 linear AVEN-009-to-010 attribution, owner-first commits after the tag, and a
@@ -91,8 +91,8 @@ source are **not** allowed by this maintenance candidate.
 `pnpm check` retains the MAINT-001 composition of format-check, typecheck,
 experiment-check and current-checkout tests. `pnpm attribution:check` is the
 separate mandatory postfreeze history gate. CI runs both checks and the
-historical full-suite check from the original tag; no historical assertions
-are deleted or weakened.
+historical full-suite check from the original tag; no historical assertions are
+deleted or weakened.
 
 The post-freeze gate enforces owner author/committer identity and a Claude
 co-author trailer for the policy/AI-assisted series; if owner-only commits are
