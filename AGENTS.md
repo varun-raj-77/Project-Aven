@@ -4,30 +4,29 @@
 
 **AVEN-010 was independently approved and frozen on 2026-10-13.** The immutable
 `aven-010` annotated tag and `main` milestone commit are
-`76535d8647ee36e56bd2efd1a86642d1fc572ee7`. The older AVEN-010
-instructions and D11 decision **below are historical and apply only to the
-already-frozen AVEN-010 commits**, not to new commits. Do not rewrite or retag
-them. The current isolated branch `policy/owner-first-commits` addresses only
-owner-author attribution for future commits; **AVEN-011 is not authorized**.
+`76535d8647ee36e56bd2efd1a86642d1fc572ee7`. The older AVEN-010 instructions and
+D11 decision **below are historical and apply only to the already-frozen
+AVEN-010 commits**, not to new commits. Do not rewrite or retag them. The
+current isolated branch `policy/owner-first-commits` addresses only owner-author
+attribution for future commits; **AVEN-011 is not authorized**.
 
-For every subsequent Claude-assisted commit, author AND committer must be
-the owner, `Varun Karthik` (or `varun-raj-77`), using either verified
+For every subsequent Claude-assisted commit, author AND committer must be the
+owner, `Varun Karthik` (or `varun-raj-77`), using either verified
 `varunraj2117@gmail.com` or the account-linked GitHub
-`71327884+varun-raj-77@users.noreply.github.com`. Give Claude transparent
-credit using exactly one parsed final trailer:
-`Co-authored-by: Claude <noreply@anthropic.com>`. A GitHub connector may
-choose the authenticated owner's GitHub noreply email by default; verify
-that the GitHub API resolves both fields to `varun-raj-77`.
+`71327884+varun-raj-77@users.noreply.github.com`. Give Claude transparent credit
+using exactly one parsed final trailer:
+`Co-authored-by: Claude <noreply@anthropic.com>`. A GitHub connector may choose
+the authenticated owner's GitHub noreply email by default; verify that the
+GitHub API resolves both fields to `varun-raj-77`.
 
 Before pushing new commits run `pnpm attribution:self-test`,
-`pnpm attribution:check`, `pnpm check`, and inspect `git show -s
---format=fuller HEAD`. **Never waive a failed attribution gate.** The
-combined gate audits the old frozen 16 commits with the original evaluator
-and enforces owner-first identity for all commits after AVEN-010. For
-details see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. Do not merge this
-policy maintenance branch until it passes independent review and the
-owner explicitly authorizes the merge.
-
+`pnpm attribution:check`, `pnpm check`, and inspect
+`git show -s --format=fuller HEAD`. **Never waive a failed attribution gate.**
+The combined gate audits the old frozen 16 commits with the original evaluator
+and enforces owner-first identity for all commits after AVEN-010. For details
+see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. Do not merge this policy
+maintenance branch until it passes independent review and the owner explicitly
+authorizes the merge.
 
 ## Authority and scope
 
