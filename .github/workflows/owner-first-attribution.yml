@@ -29,6 +29,13 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 11.19.0
+      - name: Approve only pinned native CI dependency builds
+        run: |
+          cat >> pnpm-workspace.yaml <<'EOF'
+          allowBuilds:
+            better-sqlite3: true
+            esbuild: true
+          EOF
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Run full repository quality gate
