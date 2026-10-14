@@ -7,8 +7,11 @@
 `76535d8647ee36e56bd2efd1a86642d1fc572ee7`. The older AVEN-010 instructions and
 D11 decision **below are historical and apply only to the already-frozen
 AVEN-010 commits**, not to new commits. Do not rewrite or retag them. The
-current isolated branch `policy/owner-first-commits` addresses only owner-author
-attribution for future commits; **AVEN-011 is not authorized**.
+owner-first attribution policy was merged to `main` at
+`c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be`, the AVEN-011 baseline. Wherever an
+older section below names the AVEN-010 branch, AVEN-010-only authorization or
+Claude as commit author, it is historical; current authorization is in the
+AVEN-011 section.
 
 For every subsequent Claude-assisted commit, author AND committer must be the
 owner, `Varun Karthik` (or `varun-raj-77`), using either verified
@@ -23,12 +26,71 @@ Before pushing new commits run `pnpm attribution:self-test`,
 `pnpm attribution:check`, `pnpm check`, and inspect
 `git show -s --format=fuller HEAD`. **Never waive a failed attribution gate.**
 The combined gate audits the old frozen 16 commits with the original evaluator
-and enforces owner-first identity for all commits after AVEN-010. For details
-see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. Do not merge this policy
-maintenance branch until it passes independent review and the owner explicitly
-authorizes the merge.
+and enforces owner-first identity for all commits after AVEN-010; for AVEN-011
+it also enforces the exact versioned file governance `aven-011-governance-v1`.
+For details see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`.
+
+## AVEN-011 authorization and working plan
+
+AVEN-011 is the **Action Proposal Boundary**. The accepted design reuses the
+frozen AVEN-002 contracts (`ActionProposalSchema`, `ProposalBindingSchema`,
+`RequestedAuthoritySchema`, `ResourceTargetSchema` and the `action_proposed`
+event) unchanged and adds one package, `packages/action-proposals`
+(`@aven/action-proposals`). Aven proposes; Root decides. AVEN-011 makes no
+policy decision, records no approval, executes no tool, calls no model, writes
+no owner state, learns nothing and is not wired into the API; Root is AVEN-012.
+
+The owner has authorized **preparing Patch 1 only**. Every later patch needs
+independent review of the previous one and explicit owner authorization. Work
+only on the isolated milestone branch `aven-011/action-proposals`, created from
+`c8b83ec`: never merge it into `main` during the milestone, tag it, squash,
+rebase, rewrite accepted commits or force-push. Claude prepares each patch file
+and commit-message draft outside the tracked tree and never commits under the
+owner's identity; the owner applies, reviews, commits as author and committer,
+and pushes. If `main` moves during AVEN-011, stop and ask.
+
+Patches, each one reviewed commit (corrective commits after review findings are
+separate commits). The gate enforces the exact file inventory:
+
+1. Governance: the successor attribution gate, this file and
+   `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. **Current patch: candidate pending
+   independent code review.**
+2. Package scaffold and pure boundary: construction, validation, canonical
+   proposal digest v1 and inspection.
+3. Recorder and reconciliation: one frozen Ledger append per recording, outcomes
+   `not_written`, `rolled_back` or `unknown`, and reconciliation by comparison
+   of the full expected event.
+4. Read-only historical reader: one record per event, with digest agreement,
+   proposal format and event format classified separately.
+5. Cross-layer adversarial and regression campaign.
+6. Report and status reconciliation (`docs/AVEN_011_REPORT.md`, `README.md`,
+   `docs/ROADMAP.md`).
+
+Trusted evaluator: Patch 1 is verified with the gate from `c8b83ec`. Once the
+owner-created Patch 1 commit is independently accepted, its exact SHA is the
+trusted reference `T`; reviewers run `T`'s gate, not the candidate's, against
+Patches 2 to 6 with `--governance-frozen-at T`. Candidate CI is advisory.
+
+Accepted v1 boundaries:
+
+- A proposal's origin is declared on its event (`model_inference` or
+  `system_generated`), is never part of the payload or its digest, and is never
+  authenticated.
+- The v1 recording format excludes learning-lifecycle operations and non-read
+  operations on learned state; reads of learned state are allowed. This is a
+  format restriction of the recorder, not Root enforcement.
+- The proposal digest is SHA-256 over `AVEN-011-ACTION-PROPOSAL-DIGEST-V1`, a
+  NUL byte and the canonical JSON of the full payload; ill-formed Unicode is
+  rejected. A matching digest shows integrity consistency only, never authorship
+  or authorization.
+- Prior approval citations stay unverified; their validity is Root's decision.
+- There is no exactly-once guarantee; caller-allocated identifiers and
+  reconciliation make a retry safe.
 
 ## Authority and scope
+
+Historical record of the AVEN-010 authorization; current authorization is in the
+AVEN-011 section above.
 
 Build Aven v0.1. Project selection is closed unless implementation evidence
 reveals a concrete fatal problem. Current authorized work is **AVEN-010 only**:
@@ -69,6 +131,8 @@ instructions take precedence over both documents. `docs/AVEN_PRINCIPLES.md`
 records the invariants.
 
 ## AVEN-010 working plan
+
+Historical: AVEN-010 is frozen at `76535d8`; this plan is kept as its record.
 
 Accepted design (independent review): one new package, `packages/corrections`
 (`@aven/corrections`); every frozen layer stays byte-identical. Patches, each a
