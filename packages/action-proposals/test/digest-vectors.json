@@ -1,0 +1,423 @@
+{
+  "description": "AVEN-011 action-proposal digest protocol v1 golden vectors. Generated independently of the code under test.",
+  "procedure": [
+    "Python 3 standard library only.",
+    "canonical = json.dumps(proposal, sort_keys=True, separators=(',', ':'), ensure_ascii=False)",
+    "digest = hashlib.sha256(b'AVEN-011-ACTION-PROPOSAL-DIGEST-V1' + b'\\x00' + canonical.encode('utf-8')).hexdigest()",
+    "plainSha256OfCanonical = hashlib.sha256(canonical.encode('utf-8')).hexdigest() (domain-separation check only).",
+    "Rejected vectors contain an unpaired surrogate; strict UTF-8 encoding of their canonical text fails.",
+    "Python sorts keys by code point and the protocol by UTF-16 code unit; they agree because every v1 key is ASCII."
+  ],
+  "protocol": "AVEN-011-ACTION-PROPOSAL-DIGEST-V1",
+  "vectors": [
+    {
+      "name": "v1-minimal-ascii",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_1",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "Prepare a synthetic draft."
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": []
+      },
+      "canonical": "{\"action\":\"draft\",\"consequences\":{\"description\":\"Prepare a synthetic draft.\",\"reversibility\":\"reversible\",\"risk\":\"low\"},\"id\":\"proposal_vector_1\",\"kind\":\"action_proposal\",\"metadata\":{\"createdAt\":\"2026-10-14T09:00:00Z\",\"creation\":{\"component\":\"@aven/action-proposals\",\"version\":\"aven-011-action-proposals-v1\"},\"recordVersion\":1,\"schemaVersion\":1},\"ownerId\":\"owner_vector\",\"parameters\":{\"artifact\":{\"digest\":{\"algorithm\":\"sha256\",\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"locator\":\"synthetic:parameters-1\"},\"kind\":\"immutable_reference\"},\"priorApprovalIds\":[],\"requestedAuthority\":[{\"operation\":\"draft\",\"resource\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"}}],\"target\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"},\"task\":{\"sessionId\":\"session_vector\",\"taskId\":\"task_vector\"},\"toolId\":\"synthetic-sandbox-tool\"}",
+      "digest": "571e7c8009ac2719aa39c3fef2af204df8a40a246869df6654d73192838a71f7",
+      "plainSha256OfCanonical": "cb3d8456ddd3b2883ea35ba6c041fa52ca79a149100a31f5a4dc09ca6b131863"
+    },
+    {
+      "name": "v2-unicode-and-escapes",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T14:30:00.125+05:30",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_2",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-tool-\u00fc",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "unknown",
+          "reversibility": "unknown",
+          "description": "Caf\u00e9 \"draft\" \\ tab\there\u0001 nl\n cr\r ff\f bs\b del\u007f sep\u2028 para\u2029 astral \ud83d\ude00 decomposed e\u0301 slash/"
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": []
+      },
+      "canonical": "{\"action\":\"draft\",\"consequences\":{\"description\":\"Caf\u00e9 \\\"draft\\\" \\\\ tab\\there\\u0001 nl\\n cr\\r ff\\f bs\\b del\u007f sep\u2028 para\u2029 astral \ud83d\ude00 decomposed e\u0301 slash/\",\"reversibility\":\"unknown\",\"risk\":\"unknown\"},\"id\":\"proposal_vector_2\",\"kind\":\"action_proposal\",\"metadata\":{\"createdAt\":\"2026-10-14T14:30:00.125+05:30\",\"creation\":{\"component\":\"@aven/action-proposals\",\"version\":\"aven-011-action-proposals-v1\"},\"recordVersion\":1,\"schemaVersion\":1},\"ownerId\":\"owner_vector\",\"parameters\":{\"artifact\":{\"digest\":{\"algorithm\":\"sha256\",\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"locator\":\"synthetic:parameters-1\"},\"kind\":\"immutable_reference\"},\"priorApprovalIds\":[],\"requestedAuthority\":[{\"operation\":\"draft\",\"resource\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"}}],\"target\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"},\"task\":{\"sessionId\":\"session_vector\",\"taskId\":\"task_vector\"},\"toolId\":\"synthetic-tool-\u00fc\"}",
+      "digest": "8210f7f96036788805c7a1f0c82a8e59df15a0d4d1dbbcf29e5e71e6ee821d26",
+      "plainSha256OfCanonical": "c2cc5821ccdf5df420784a79f39cebdd96298d040c6fb3645c220647fd685de1"
+    },
+    {
+      "name": "v3a-arrays",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_3",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "Prepare a synthetic draft."
+        },
+        "requestedAuthority": [
+          {
+            "operation": "read",
+            "resource": {
+              "kind": "document",
+              "identifier": "synthetic-doc-1"
+            }
+          },
+          {
+            "operation": "read",
+            "resource": {
+              "kind": "learned_state",
+              "identifier": "learned_vector"
+            }
+          },
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": ["approval_vector_a", "approval_vector_b"]
+      },
+      "canonical": "{\"action\":\"draft\",\"consequences\":{\"description\":\"Prepare a synthetic draft.\",\"reversibility\":\"reversible\",\"risk\":\"low\"},\"id\":\"proposal_vector_3\",\"kind\":\"action_proposal\",\"metadata\":{\"createdAt\":\"2026-10-14T09:00:00Z\",\"creation\":{\"component\":\"@aven/action-proposals\",\"version\":\"aven-011-action-proposals-v1\"},\"recordVersion\":1,\"schemaVersion\":1},\"ownerId\":\"owner_vector\",\"parameters\":{\"artifact\":{\"digest\":{\"algorithm\":\"sha256\",\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"locator\":\"synthetic:parameters-1\"},\"kind\":\"immutable_reference\"},\"priorApprovalIds\":[\"approval_vector_a\",\"approval_vector_b\"],\"requestedAuthority\":[{\"operation\":\"read\",\"resource\":{\"identifier\":\"synthetic-doc-1\",\"kind\":\"document\"}},{\"operation\":\"read\",\"resource\":{\"identifier\":\"learned_vector\",\"kind\":\"learned_state\"}},{\"operation\":\"draft\",\"resource\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"}}],\"target\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"},\"task\":{\"sessionId\":\"session_vector\",\"taskId\":\"task_vector\"},\"toolId\":\"synthetic-sandbox-tool\"}",
+      "digest": "3ad4e5b250ec1a328f71cb144111604f9c1ad14952b0db9e498d97fce91d20a7",
+      "plainSha256OfCanonical": "db43b98c25c1f6fb7fb9fbc368da9efecc566eb666f78b2e23612df62200874c"
+    },
+    {
+      "name": "v3b-arrays-reversed",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_3",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "Prepare a synthetic draft."
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          },
+          {
+            "operation": "read",
+            "resource": {
+              "kind": "learned_state",
+              "identifier": "learned_vector"
+            }
+          },
+          {
+            "operation": "read",
+            "resource": {
+              "kind": "document",
+              "identifier": "synthetic-doc-1"
+            }
+          }
+        ],
+        "priorApprovalIds": ["approval_vector_b", "approval_vector_a"]
+      },
+      "canonical": "{\"action\":\"draft\",\"consequences\":{\"description\":\"Prepare a synthetic draft.\",\"reversibility\":\"reversible\",\"risk\":\"low\"},\"id\":\"proposal_vector_3\",\"kind\":\"action_proposal\",\"metadata\":{\"createdAt\":\"2026-10-14T09:00:00Z\",\"creation\":{\"component\":\"@aven/action-proposals\",\"version\":\"aven-011-action-proposals-v1\"},\"recordVersion\":1,\"schemaVersion\":1},\"ownerId\":\"owner_vector\",\"parameters\":{\"artifact\":{\"digest\":{\"algorithm\":\"sha256\",\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"locator\":\"synthetic:parameters-1\"},\"kind\":\"immutable_reference\"},\"priorApprovalIds\":[\"approval_vector_b\",\"approval_vector_a\"],\"requestedAuthority\":[{\"operation\":\"draft\",\"resource\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"}},{\"operation\":\"read\",\"resource\":{\"identifier\":\"learned_vector\",\"kind\":\"learned_state\"}},{\"operation\":\"read\",\"resource\":{\"identifier\":\"synthetic-doc-1\",\"kind\":\"document\"}}],\"target\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"},\"task\":{\"sessionId\":\"session_vector\",\"taskId\":\"task_vector\"},\"toolId\":\"synthetic-sandbox-tool\"}",
+      "digest": "5e82ead2ad570665dedfc235511b2266489b7e75c1f97cc9218e0f171a206b27",
+      "plainSha256OfCanonical": "a3c9302c85461a5d7cc1fef7ab29a9bff33e270160411ff0bb3987ec7dc8cb4f"
+    },
+    {
+      "name": "v4-locator-only-change",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_1",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1-relocated",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "Prepare a synthetic draft."
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": []
+      },
+      "canonical": "{\"action\":\"draft\",\"consequences\":{\"description\":\"Prepare a synthetic draft.\",\"reversibility\":\"reversible\",\"risk\":\"low\"},\"id\":\"proposal_vector_1\",\"kind\":\"action_proposal\",\"metadata\":{\"createdAt\":\"2026-10-14T09:00:00Z\",\"creation\":{\"component\":\"@aven/action-proposals\",\"version\":\"aven-011-action-proposals-v1\"},\"recordVersion\":1,\"schemaVersion\":1},\"ownerId\":\"owner_vector\",\"parameters\":{\"artifact\":{\"digest\":{\"algorithm\":\"sha256\",\"value\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"locator\":\"synthetic:parameters-1-relocated\"},\"kind\":\"immutable_reference\"},\"priorApprovalIds\":[],\"requestedAuthority\":[{\"operation\":\"draft\",\"resource\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"}}],\"target\":{\"identifier\":\"synthetic-draft-1\",\"kind\":\"sandbox_resource\"},\"task\":{\"sessionId\":\"session_vector\",\"taskId\":\"task_vector\"},\"toolId\":\"synthetic-sandbox-tool\"}",
+      "digest": "c31c96c4eae7207b85ed3d86d50f129341a32aaf0b4dde30d19ab7e491f855d6",
+      "plainSha256OfCanonical": "1f7d42a13a5b772870e5921790d83df95c20904fe223ab1c1fd7c158e4dc4088"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "lone-high-surrogate",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_1",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "draft",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "lone high \ud800 surrogate"
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": []
+      }
+    },
+    {
+      "name": "lone-low-surrogate",
+      "proposal": {
+        "kind": "action_proposal",
+        "ownerId": "owner_vector",
+        "metadata": {
+          "schemaVersion": 1,
+          "recordVersion": 1,
+          "createdAt": "2026-10-14T09:00:00Z",
+          "creation": {
+            "component": "@aven/action-proposals",
+            "version": "aven-011-action-proposals-v1"
+          }
+        },
+        "id": "proposal_vector_1",
+        "task": {
+          "sessionId": "session_vector",
+          "taskId": "task_vector"
+        },
+        "toolId": "synthetic-sandbox-tool",
+        "action": "lone low \udc00 surrogate",
+        "parameters": {
+          "kind": "immutable_reference",
+          "artifact": {
+            "locator": "synthetic:parameters-1",
+            "digest": {
+              "algorithm": "sha256",
+              "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        },
+        "target": {
+          "kind": "sandbox_resource",
+          "identifier": "synthetic-draft-1"
+        },
+        "consequences": {
+          "risk": "low",
+          "reversibility": "reversible",
+          "description": "Prepare a synthetic draft."
+        },
+        "requestedAuthority": [
+          {
+            "operation": "draft",
+            "resource": {
+              "kind": "sandbox_resource",
+              "identifier": "synthetic-draft-1"
+            }
+          }
+        ],
+        "priorApprovalIds": []
+      }
+    }
+  ]
+}
