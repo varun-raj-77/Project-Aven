@@ -7,7 +7,7 @@ import { PRECHECK_SQL } from '../src/ledger/record.ts';
 import { READ_SQL } from '../src/ledger/stored.ts';
 
 /**
- * AVEN-011 Patches 2 and 3: static REGRESSION TRIPWIRES over the pure root
+ * AVEN-011 Patches 2 to 4: static REGRESSION TRIPWIRES over the pure root
  * entry and the `./ledger` subpath. They make obvious regressions visible in
  * review; they are pattern checks, NOT security guarantees, and deliberately
  * obfuscated code can bypass them. Every rule is also run against known-bad
@@ -77,8 +77,9 @@ const FORBIDDEN_CODE: [string, RegExp][] = [
 ];
 
 /** The `./ledger` subpath: the only modules that may touch storage. */
-const LEDGER_FILES = ['index.ts', 'record.ts', 'stored.ts'];
+const LEDGER_FILES = ['history.ts', 'index.ts', 'record.ts', 'stored.ts'];
 const LEDGER_LOCAL = [
+  './history.ts',
   './record.ts',
   './stored.ts',
   '../canonical.ts',
@@ -102,18 +103,19 @@ const LEDGER_PERMITTED: Record<string, { names: string[]; files: string[] }> = {
       'TimestampSchema',
       'ActionProposal',
       'ProposalBinding',
+      'Provenance',
     ],
-    files: ['record.ts', 'stored.ts'],
+    files: ['history.ts', 'record.ts', 'stored.ts'],
   },
   '@aven/ledger': {
     names: ['createLedger', 'LedgerError', 'EventInput', 'StoredEvent'],
-    files: ['record.ts', 'stored.ts'],
+    files: ['history.ts', 'record.ts', 'stored.ts'],
   },
   '@aven/storage': {
     names: ['deserializeContract', 'Storage'],
-    files: ['record.ts', 'stored.ts'],
+    files: ['history.ts', 'record.ts', 'stored.ts'],
   },
-  zod: { names: ['z'], files: ['record.ts'] },
+  zod: { names: ['z'], files: ['history.ts', 'record.ts'] },
 };
 const LEDGER_FORBIDDEN: [string, RegExp][] = [
   ...FORBIDDEN_CODE.filter(([label]) => !label.startsWith('storage')),
@@ -129,7 +131,7 @@ const LEDGER_FORBIDDEN: [string, RegExp][] = [
     'direct connection control',
     /\.(exec|run|iterate|transaction|pragma|backup|serialize|close|function|aggregate|table|loadExtension|unsafeMode|defaultSafeIntegers)\s*\(/,
   ],
-  ['other Ledger operations', /\b(listEvents|replayEvents|inspectIntegrity)\b/],
+  ['other Ledger operations', /\b(replayEvents|inspectIntegrity)\b/],
   ['connection lifecycle', /\b(openStorage|migrate)\b/],
   // Timestamps are ordered exactly (Codex F1): no millisecond Date values.
   ['Date-based time arithmetic', /\bDate\b/],
@@ -207,6 +209,21 @@ function ledgerViolations(file: string, text: string): string[] {
   const appends = text.match(/\bappendEvent\b/g)?.length ?? 0;
   if (appends !== (file === 'record.ts' ? 1 : 0))
     errors.push(`${file}: ${appends} appendEvent calls`);
+  // Only the reader pages history, and it pages exactly once per call.
+  const pages = text.match(/\blistEvents\b/g)?.length ?? 0;
+  if (pages !== (file === 'history.ts' ? 1 : 0))
+    errors.push(`${file}: ${pages} listEvents calls`);
+  // The reader reaches neither the recorder nor reconciliation.
+  if (
+    file === 'history.ts' &&
+    /\b(recordActionProposal|reconcileActionProposalRecording|expectedRecordingEvent|getEvent)\b/.test(
+      text,
+    )
+  )
+    errors.push(`${file}: recorder or reconciliation`);
+  // The reader reaches storage only through the Ledger and `readRow`.
+  if (file === 'history.ts' && /\.sqlite\b/.test(text))
+    errors.push(`${file}: direct connection access`);
   return errors;
 }
 
@@ -302,7 +319,7 @@ describe('pure root entry: static boundaries', () => {
 });
 
 describe('./ledger subpath: static boundaries', () => {
-  it('contains exactly the Patch 3 modules', () => {
+  it('contains exactly the Patch 3 and Patch 4 modules', () => {
     const entries = readdirSync(ledgerDir, { withFileTypes: true });
     expect(entries.every((e) => e.isFile())).toBe(true);
     expect(entries.map((e) => e.name).sort()).toEqual(LEDGER_FILES);
@@ -330,6 +347,13 @@ describe('./ledger subpath: static boundaries', () => {
     expect(Object.isFrozen(READ_SQL) && Object.isFrozen(PRECHECK_SQL)).toBe(
       true,
     );
+  });
+
+  it('the reader adds no SQL of its own and reuses the pinned projection read', () => {
+    const reader = ledgerSourceOf('history.ts');
+    expect(reader).not.toMatch(/\bSELECT\b|\bFROM\b|\bWHERE\b/);
+    expect(reader).toMatch(/\bREAD_SQL\.projection\b/);
+    expect(reader.match(/\bREAD_SQL\.\w+/g)).toEqual(['READ_SQL.projection']);
   });
 
   it.each([
@@ -360,6 +384,22 @@ describe('./ledger subpath: static boundaries', () => {
     ['record.ts', `const t = Date.UTC(2026, 9, 14);`],
     ['record.ts', `const r = randomUUID();`],
     ['record.ts', `console.log('x');`],
+    ['stored.ts', `ledger.listEvents();`],
+    ['history.ts', `ledger.appendEvent(e);\nledger.listEvents({});`],
+    ['history.ts', `ledger.listEvents({});\nledger.listEvents({});`],
+    ['history.ts', `recordActionProposal(storage, r);\nledger.listEvents({});`],
+    ['history.ts', `ledger.getEvent(id);\nledger.listEvents({});`],
+    ['history.ts', `ledger.replayEvents();\nledger.listEvents({});`],
+    ['history.ts', `ledger.inspectIntegrity();\nledger.listEvents({});`],
+    [
+      'history.ts',
+      `import { openStorage } from '@aven/storage';\nledger.listEvents({});`,
+    ],
+    [
+      'history.ts',
+      `const q = 'UPDATE action_proposals SET x = 1';\nledger.listEvents({});`,
+    ],
+    ['history.ts', `storage.sqlite.prepare(q);\nledger.listEvents({});`],
   ])('rejects the known-bad sample %# in %s', (file, sample) => {
     const text =
       file === 'record.ts' ? `${sample}\nledger.appendEvent(e);` : sample;
@@ -372,8 +412,9 @@ describe('./ledger subpath: static boundaries', () => {
     ).toEqual(['record.ts: 2 appendEvent calls']);
   });
 
-  it('exports exactly the recorder and reconciliation', () => {
+  it('exports exactly the recorder, reconciliation and the reader', () => {
     expect(Object.keys(ledgerApi).sort()).toEqual([
+      'readProposalEvents',
       'reconcileActionProposalRecording',
       'recordActionProposal',
     ]);

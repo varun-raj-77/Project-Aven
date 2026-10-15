@@ -1,9 +1,8 @@
 # @aven/action-proposals
 
 AVEN-011 Action Proposal Boundary, version `aven-011-action-proposals-v1`.
-**Patch 3 (this state): the pure root entry and the `./ledger` subpath with the
-recorder and reconciliation.** The read-only history reader (Patch 4) is not
-implemented yet.
+**Patch 4 (this state): the pure root entry and the `./ledger` subpath with the
+recorder, reconciliation and the read-only historical reader.**
 
 Aven proposes; Root decides. This package reuses the frozen AVEN-002 contracts
 (`ActionProposalSchema`, `ProposalBindingSchema` and their nested schemas)
@@ -144,6 +143,44 @@ The identifier prechecks are best-effort. Under a concurrent writer, a duplicate
 event identifier is rolled back by the Ledger, and a different payload under a
 taken proposal identifier is rejected; an identical payload under a new event
 identifier is recorded as a second event re-observing the existing snapshot.
+
+## Reading history (`readProposalEvents`)
+
+`readProposalEvents(storage, ownerId, filter?)` reads one page of the owner's
+`action_proposed` events through the frozen Ledger `listEvents` and returns one
+record per event, in sequence order, with nothing dropped, merged or ranked. The
+filter is `{ sessionId?, taskId?, afterSequence?, throughSequence?, limit? }`
+(limit 1–1000, default 100); the event type is always `action_proposed`.
+`throughSequence` and `nextCursor` are the Ledger's own, so the caller pages
+with the same filter. Every re-recording of one proposal is its own record with
+its own provenance and sequence. The reader writes nothing, repairs nothing and
+works on a `query_only` connection.
+
+Each record carries `sequence`, `eventId`, `occurredAt`, `recordedAt`,
+`envelopeTask` (or `null`), `evidenceIds`, the verbatim `provenance` with
+`origin: 'declared_unauthenticated'`, the verbatim `proposal` (required to equal
+its frozen `action_proposals` projection), the `declaredDigest` and four
+independent classifications:
+
+| Field                    | Values and meaning                                                                                                                                                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocol`               | `v1` only for exactly the v1 creation stamp; otherwise `unsupported`, and everything below is `not_evaluated` (reported, not an error)                                                                                                                                                          |
+| `digest`                 | `agrees` / `disagrees` with the declared digest; `not_evaluated` outside the digest domain (ill-formed Unicode). Size limits do not affect it                                                                                                                                                   |
+| `proposalFormat`         | `conforming` or `nonconforming` with reasons `proposal_ill_formed_unicode`, `proposal_limits_exceeded`, `proposal_record_version_not_1`, `proposal_operation_not_in_v1_format`                                                                                                                  |
+| `eventFormat`            | `conforming` or `nonconforming` with reasons `event_task_missing`, `event_origin_kind_unsupported`, `event_provenance_ill_formed_unicode`, `event_provenance_limits_exceeded`, `event_evidence_present`, `event_metadata_not_v1`, `event_occurs_before_proposal_creation` (exact instant order) |
+| `priorApprovalCitations` | Each cited approval as `cited_unverified`; binding, status, expiry and bounds are never evaluated                                                                                                                                                                                               |
+
+None of this is authentication. The digest function and the v1 stamp are public,
+and the frozen Ledger accepts appends from any code with storage access, so
+`conforming` with `agrees` does not show that the recorder wrote the record. A
+record is evidence of recording only: never a permission, approval or Root
+decision.
+
+The whole call fails closed with no partial page (outcome `not_written`):
+`invalid_request` (owner or filter), `unknown_binding` (owner absent),
+`invalid_history` (an event that fails frozen validation, or a projection that
+is missing, differs from its payload or has an unusable digest),
+`storage_failure` (an open transaction or a failing read) or `internal_error`.
 
 ## Checks
 
