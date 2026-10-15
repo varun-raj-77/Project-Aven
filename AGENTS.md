@@ -40,36 +40,48 @@ event) unchanged and adds one package, `packages/action-proposals`
 policy decision, records no approval, executes no tool, calls no model, writes
 no owner state, learns nothing and is not wired into the API; Root is AVEN-012.
 
-The owner has authorized **preparing Patch 1 only**. Every later patch needs
-independent review of the previous one and explicit owner authorization. Work
-only on the isolated milestone branch `aven-011/action-proposals`, created from
-`c8b83ec`: never merge it into `main` during the milestone, tag it, squash,
-rebase, rewrite accepted commits or force-push. Claude prepares each patch file
-and commit-message draft outside the tracked tree and never commits under the
-owner's identity; the owner applies, reviews, commits as author and committer,
-and pushes. If `main` moves during AVEN-011, stop and ask.
+Patches 1-3 were prepared one at a time, independently accepted and committed by
+the owner. The owner then authorized preparing **Patches 4, 5 and 6 together as
+separate implementation candidates**, each with its own independent review and
+its own owner commit, in order; that authorization accepted, committed and froze
+nothing. Patches 4 and 5 were then accepted and committed with GitHub CI
+passing; Patch 6 remains a candidate. Work only on the isolated milestone branch
+`aven-011/action-proposals`, created from `c8b83ec`: never merge it into `main`
+during the milestone, tag it, squash, rebase, rewrite accepted commits or
+force-push. Claude prepares each patch file and commit-message draft outside the
+tracked tree and never commits under the owner's identity; the owner applies,
+reviews, commits as author and committer, and pushes. If `main` moves during
+AVEN-011, stop and ask.
 
 Patches, each one reviewed commit (corrective commits after review findings are
 separate commits). The gate enforces the exact file inventory:
 
 1. Governance: the successor attribution gate, this file and
-   `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. **Current patch: candidate pending
-   independent code review.**
+   `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`. Accepted; committed as
+   `3761c775b5650e353816b3395e4d71022398afd1` (`T`).
 2. Package scaffold and pure boundary: construction, validation, canonical
-   proposal digest v1 and inspection.
+   proposal digest v1 and inspection. Accepted; committed as `8b25e89`.
 3. Recorder and reconciliation: one frozen Ledger append per recording, outcomes
-   `not_written`, `rolled_back` or `unknown`, and reconciliation by comparison
-   of the full expected event.
+   `not_written`, `rolled_back` or `unknown`, reconciliation by comparison of
+   the full expected event, and exact timestamp order (review finding F1).
+   Accepted; committed as `2e84dbc`.
 4. Read-only historical reader: one record per event, with digest agreement,
-   proposal format and event format classified separately.
-5. Cross-layer adversarial and regression campaign.
+   proposal format and event format classified separately. Accepted; committed
+   as `9bd2ad7`.
+5. Cross-layer adversarial and regression campaign (tests only). Accepted;
+   committed as `f494511`.
 6. Report and status reconciliation (`docs/AVEN_011_REPORT.md`, `README.md`,
-   `docs/ROADMAP.md`).
+   `docs/ROADMAP.md`, this file, the root `package.json` description and the
+   package README). **Candidate pending independent review.**
 
-Trusted evaluator: Patch 1 is verified with the gate from `c8b83ec`. Once the
-owner-created Patch 1 commit is independently accepted, its exact SHA is the
-trusted reference `T`; reviewers run `T`'s gate, not the candidate's, against
-Patches 2 to 6 with `--governance-frozen-at T`. Candidate CI is advisory.
+Trusted evaluator: Patch 1 was verified with the gate from `c8b83ec`. The
+accepted Patch 1 commit `3761c775b5650e353816b3395e4d71022398afd1` is the
+trusted reference `T` (gate blob `8fe769e70143b513da83ebccece0da3a9fb22a93`,
+`attribution.ts` blob `aa033604688134b1311fd0bb5c9562f39e371c74`); reviewers run
+`T`'s gate, not the candidate's, against Patches 2 to 6 with
+`--governance-frozen-at T`. Candidate CI is advisory. AVEN-011 is not accepted
+as a milestone, not merged and not tagged; recording the acceptance of Patch 6
+or a freeze requires a later reviewed change made after those events.
 
 Accepted v1 boundaries:
 
@@ -276,7 +288,10 @@ Consequences:
   lifecycle-claim, view, rebuild and context-source mechanics, the AVEN-010
   commit attribution rules on synthetic Git repositories, and the AVEN-010
   correction recorder, history reader, evidence index, resolver and Broker
-  integration (including a cross-layer campaign on file-backed SQLite), all on
+  integration (including a cross-layer campaign on file-backed SQLite), and the
+  AVEN-011 proposal construction, digest golden vectors, recorder,
+  reconciliation, historical reader and a cross-layer campaign (including a
+  fresh-process `query_only` replay and Root-nonauthority checks), all on
   synthetic data, not a complete Aven runtime. Run `pnpm attribution:check`
   before every push. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
@@ -396,13 +411,24 @@ and is not wired into the API. Its synthetic benchmarks
 (`packages/corrections/bench`) are diagnostic only. The inherited native-memory
 risk of large synchronous storage batches needs a separate resource-readiness
 gate before bulk ingestion or long-lived deployment; no maintenance of frozen
-layers is authorized. Other app/package directories remain placeholders. Tooling
-schemas still describe experimental metadata only. No live provider adapter or
-network model call, Strands or other framework adapter, public generation route,
-durable owner-state writer, learning algorithms, correction interpretation from
-free text, learned negative-signal generation, routing, streaming, tool calling,
-Root enforcement, authentication, UI, execution, scorer, promotion controller,
-or agent orchestration in this milestone. Stop after each patch and report
-files, checks, attribution status, assumptions, and deliberate deferrals for
-external review. Commit only to the isolated AVEN-010 branch; do not merge or
-tag.
+layers is authorized. `packages/action-proposals` (`@aven/action-proposals`,
+version `aven-011-action-proposals-v1`; see its README and
+`docs/AVEN_011_REPORT.md`) holds AVEN-011. Its pure root entry constructs,
+validates, digests (protocol v1), binds and inspects frozen AVEN-002 action
+proposals. The `./ledger` subpath holds `recordActionProposal`, the only
+AVEN-011 write (one frozen Ledger append), the read-only
+`reconcileActionProposalRecording` and the read-only `readProposalEvents`, which
+classifies recorded proposal events with declared, unauthenticated origins and
+unverified approval citations. A recorded proposal is never a permission,
+approval or Root decision; the package decides, executes and learns nothing and
+is not wired into the API. Other app/package directories remain placeholders.
+Tooling schemas still describe experimental metadata only. No live provider
+adapter or network model call, Strands or other framework adapter, public
+generation route, durable owner-state writer, learning algorithms, correction
+interpretation from free text, learned negative-signal generation, routing,
+streaming, tool calling, Root enforcement, authentication, UI, execution,
+scorer, promotion controller, or agent orchestration in this milestone. Stop
+after each patch and report files, checks, attribution status, assumptions, and
+deliberate deferrals for external review. Commit only to the isolated milestone
+branch named in the current authorization section (for AVEN-011,
+`aven-011/action-proposals`); do not merge or tag.

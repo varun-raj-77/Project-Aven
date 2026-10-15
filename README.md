@@ -5,12 +5,13 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-010 Correction Events and Immediate Session Overrides,
-implementation complete on the isolated candidate branch
-`claude/adoring-pasteur-hcc5oe` over frozen AVEN-009 (`80057a2`, tag
-`aven-009`); Patch 8 (final report and documentation) is pending independent
-final review. AVEN-010 is not merged, not tagged and not frozen; `main` remains
-at AVEN-009.** The [contracts package](packages/contracts/README.md) defines
+**Current scope: AVEN-011 Action Proposal Boundary, on the isolated branch
+`aven-011/action-proposals` over the AVEN-011 baseline `c8b83ec` (frozen
+AVEN-010 at tag `aven-010`, `76535d8`). Patches 1-5 are independently accepted
+and committed, with GitHub CI passing on Patches 2-5; Patch 6 (report and status
+reconciliation) is a candidate pending independent review. AVEN-011 is not
+accepted as a milestone, not merged, not frozen and not tagged; `main` remains
+at `c8b83ec`.** The [contracts package](packages/contracts/README.md) defines
 schemas and types; the [storage package](packages/storage/README.md) provides
 local SQLite schema, integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
@@ -54,7 +55,19 @@ supersession only; and Context Broker integration that offers active corrections
 as current owner instructions, suppresses only exact corrected targets and
 reports `not_exposed` unless every instruction was actually selected. Permission
 corrections are recorded and deferred to Root. See the
-[AVEN-010 report](docs/AVEN_010_REPORT.md).
+[AVEN-010 report](docs/AVEN_010_REPORT.md); AVEN-010 is frozen at tag
+`aven-010`.
+
+The [action-proposals package](packages/action-proposals/README.md) adds
+AVEN-011: deterministic construction, validation, a canonical proposal digest
+and binding of the frozen AVEN-002 action proposals; one recorder that appends
+one `action_proposed` event through the Ledger, with explicit `not_written`,
+`rolled_back` and `unknown` outcomes and read-only reconciliation; and a
+read-only historical reader that classifies each recorded proposal event
+(protocol, digest agreement, proposal and event format) with declared,
+unauthenticated origins. Aven proposes; Root decides: a recorded proposal is not
+a permission, approval or decision. See the
+[AVEN-011 report](docs/AVEN_011_REPORT.md).
 
 **What the repository still does not have:** a live model provider or network
 model call; a general conversational agent (no HTTP route generates a response);
@@ -114,17 +127,21 @@ database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
 `pnpm --filter @aven/context-broker test` runs Context Broker tests;
 `pnpm --filter @aven/owner-model test` runs owner-model tests;
 `pnpm --filter @aven/corrections test` runs correction tests;
+`pnpm --filter @aven/action-proposals test` runs action-proposal tests;
 `pnpm dataset:check` validates the frozen AVEN-007 dataset against its manifest.
-`pnpm attribution:check` checks that every commit after the frozen `aven-009`
-baseline keeps Claude as primary author and carries the owner's exact co-author
-trailer (it needs full Git history and is deliberately separate from
-`pnpm check`; it reads commit metadata and is not authentication).
-`pnpm db:migrate` creates or migrates the ignored local `data/aven.sqlite`; it
-does not record owner experience. `pnpm api:start --owner owner_local` declares
-a local owner and serves the AVEN-005 API on `127.0.0.1:4317` (loopback only);
-`pnpm --filter @aven/api test` runs its tests. The API uses Node's built-in
-`http` module. There is no app framework or model/provider SDK. The setup
-follows the official [pnpm workspace instructions](https://pnpm.io/workspaces),
+`pnpm attribution:check` audits the frozen AVEN-010 commits with their original
+rules and requires every later commit to have the owner as author and committer
+with exactly one `Co-authored-by: Claude <noreply@anthropic.com>` trailer; for
+AVEN-011 it also enforces the versioned file governance (see
+`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). It needs full Git history, is
+deliberately separate from `pnpm check`, reads commit metadata and is not
+authentication. `pnpm db:migrate` creates or migrates the ignored local
+`data/aven.sqlite`; it does not record owner experience.
+`pnpm api:start --owner owner_local` declares a local owner and serves the
+AVEN-005 API on `127.0.0.1:4317` (loopback only); `pnpm --filter @aven/api test`
+runs its tests. The API uses Node's built-in `http` module. There is no app
+framework or model/provider SDK. The setup follows the official
+[pnpm workspace instructions](https://pnpm.io/workspaces),
 [TypeScript strict configuration](https://www.typescriptlang.org/tsconfig/strict.html),
 [Vitest guide](https://vitest.dev/guide/), and
 [Zod documentation](https://zod.dev/).
@@ -144,15 +161,16 @@ aven/
                  web (placeholder)
   packages/      contracts, storage, ledger, runtime (AVEN-006), baseline
                  (AVEN-007), context-broker (AVEN-008), owner-model
-                 (AVEN-009), corrections (AVEN-010); root, learning, eval,
-                 test-utils (placeholders)
-  tooling/       scripts, bootstrap tests and the AVEN-010 attribution gate
+                 (AVEN-009), corrections (AVEN-010), action-proposals
+                 (AVEN-011); root, learning, eval, test-utils (placeholders)
+  tooling/       scripts, bootstrap tests and the attribution gate
 ```
 
 `packages/contracts`, `packages/storage`, `packages/ledger`, `packages/runtime`,
 `packages/baseline`, `packages/context-broker`, `packages/owner-model`,
-`packages/corrections`, and `apps/api` are private workspace packages. Other
-app/package directories remain placeholders containing `.gitkeep` only.
+`packages/corrections`, `packages/action-proposals`, and `apps/api` are private
+workspace packages. Other app/package directories remain placeholders containing
+`.gitkeep` only.
 
 ## Experiment and authority
 
@@ -189,9 +207,10 @@ correction handling, promotion or permission decision. AVEN-009 is frozen at tag
 history. AVEN-010 adds explicit correction recording and immediate
 current-task/current-session overrides, separate from durable learning: an
 immediate override is transient task context, never owner memory, a trusted
-preference or Root approval. It is implementation complete on an isolated
-candidate branch, pending independent final review of Patch 8 and a separately
-authorized merge and `aven-010` tag; AVEN-011 and later work remain deferred and
-not started. The AVEN-001 source summaries and experiment documents retain their
-historical milestone context; the current authorization is recorded in
-`AGENTS.md`.
+preference or Root approval. AVEN-010 is frozen at tag `aven-010` (`76535d8`).
+AVEN-011 adds only the Action Proposal Boundary: typed, recorded proposals with
+no policy decision, approval, execution, learning or API wiring; its Patches 1-5
+are accepted and committed and Patch 6 is a candidate pending independent
+review. AVEN-012 (Root) and later work remain unauthorized and not started. The
+AVEN-001 source summaries and experiment documents retain their historical
+milestone context; the current authorization is recorded in `AGENTS.md`.

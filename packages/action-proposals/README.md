@@ -1,8 +1,12 @@
 # @aven/action-proposals
 
-AVEN-011 Action Proposal Boundary, version `aven-011-action-proposals-v1`.
-**Patch 4 (this state): the pure root entry and the `./ledger` subpath with the
-recorder, reconciliation and the read-only historical reader.**
+AVEN-011 Action Proposal Boundary, version `aven-011-action-proposals-v1`. The
+package is complete for AVEN-011: the pure root entry and the `./ledger` subpath
+with the recorder, reconciliation and the read-only historical reader. **Status:
+Patches 2-5 (including the reader and the cross-layer campaign) are accepted and
+committed, with GitHub CI passing; this documentation (Patch 6) is a candidate
+pending independent review. AVEN-011 is not accepted as a milestone, merged or
+tagged.** See the [AVEN-011 report](../../docs/AVEN_011_REPORT.md).
 
 Aven proposes; Root decides. This package reuses the frozen AVEN-002 contracts
 (`ActionProposalSchema`, `ProposalBindingSchema` and their nested schemas)
@@ -190,7 +194,16 @@ pnpm --filter @aven/action-proposals test
 pnpm check
 ```
 
+| Test file                             | Covers                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `boundaries.test.ts`                  | Static tripwires: modules, imports, exports, SQL, manifest                                                               |
+| `errors.test.ts`, `canonical.test.ts` | Fixed errors; canonical text and digest with independent golden vectors                                                  |
+| `proposal.test.ts`                    | Construction, v1 rules, binding and inspection                                                                           |
+| `record.test.ts`, `reconcile.test.ts` | Recorder outcomes, failures, races and restart; reconciliation; exact timestamp order                                    |
+| `history.test.ts`                     | Reader classifications on directly appended histories, paging, tampering, `query_only`                                   |
+| `cross-layer.test.ts`                 | End-to-end campaign, fresh-process `query_only` replay, Root nonauthority, transaction-guard precedence after validation |
+
 Tests use synthetic data only, on in-memory and temporary file-backed SQLite.
-Synthetic owner-approval and policy-decision records appear only as test setup
-to exercise references; they are not Root and decide nothing. The tests are
-boundary and mechanics tests, not security proofs.
+Synthetic owner-approval, policy-decision and execution records appear only as
+test setup to exercise references and refusals; they are not Root and decide
+nothing. The tests are boundary and mechanics tests, not security proofs.
