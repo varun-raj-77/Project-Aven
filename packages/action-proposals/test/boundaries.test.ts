@@ -2,22 +2,29 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from '../src/index.ts';
 import { ACTION_PROPOSALS_CONFIG } from '../src/index.ts';
+import * as ledgerApi from '../src/ledger/index.ts';
+import { PRECHECK_SQL } from '../src/ledger/record.ts';
+import { READ_SQL } from '../src/ledger/stored.ts';
 
 /**
- * AVEN-011 Patch 2: static REGRESSION TRIPWIRES over the pure root entry.
- * They make obvious regressions visible in review; they are pattern checks,
- * NOT security guarantees, and deliberately obfuscated code can bypass them.
- * Every rule is also run against known-bad samples, so a weakened rule fails
- * here. Later AVEN-011 patches that legitimately add a module, subpath or
- * import update these lists in their own reviewed change.
+ * AVEN-011 Patches 2 and 3: static REGRESSION TRIPWIRES over the pure root
+ * entry and the `./ledger` subpath. They make obvious regressions visible in
+ * review; they are pattern checks, NOT security guarantees, and deliberately
+ * obfuscated code can bypass them. Every rule is also run against known-bad
+ * samples, so a weakened rule fails here. Later AVEN-011 patches that
+ * legitimately add a module, subpath or import update these lists in their
+ * own reviewed change.
  */
 const srcDir = new URL('../src/', import.meta.url);
+const ledgerDir = new URL('../src/ledger/', import.meta.url);
 const repoRoot = new URL('../../../', import.meta.url);
 /** Code only: block comments and whole-line `//` comments are removed. */
 const code = (text: string) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const sourceOf = (name: string) =>
   code(readFileSync(new URL(name, srcDir), 'utf8'));
+const ledgerSourceOf = (name: string) =>
+  code(readFileSync(new URL(name, ledgerDir), 'utf8'));
 
 const SRC_FILES = [
   'canonical.ts',
@@ -69,6 +76,69 @@ const FORBIDDEN_CODE: [string, RegExp][] = [
   ['console output', /\bconsole\./],
 ];
 
+/** The `./ledger` subpath: the only modules that may touch storage. */
+const LEDGER_FILES = ['index.ts', 'record.ts', 'stored.ts'];
+const LEDGER_LOCAL = [
+  './record.ts',
+  './stored.ts',
+  '../canonical.ts',
+  '../config.ts',
+  '../errors.ts',
+  '../inert.ts',
+  '../proposal.ts',
+];
+const LEDGER_PERMITTED: Record<string, { names: string[]; files: string[] }> = {
+  '@aven/contracts': {
+    names: [
+      'ActionProposalIdSchema',
+      'EventIdSchema',
+      'ExperienceEventSchema',
+      'ModelInferenceProvenanceSchema',
+      'OwnerIdSchema',
+      'ProvenanceSchema',
+      'SessionIdSchema',
+      'SystemGeneratedProvenanceSchema',
+      'TaskIdSchema',
+      'TimestampSchema',
+      'ActionProposal',
+      'ProposalBinding',
+    ],
+    files: ['record.ts', 'stored.ts'],
+  },
+  '@aven/ledger': {
+    names: ['createLedger', 'LedgerError', 'EventInput', 'StoredEvent'],
+    files: ['record.ts', 'stored.ts'],
+  },
+  '@aven/storage': {
+    names: ['deserializeContract', 'Storage'],
+    files: ['record.ts', 'stored.ts'],
+  },
+  zod: { names: ['z'], files: ['record.ts'] },
+};
+const LEDGER_FORBIDDEN: [string, RegExp][] = [
+  ...FORBIDDEN_CODE.filter(([label]) => !label.startsWith('storage')),
+  [
+    'runtime or other Aven layers',
+    /@aven\/(runtime|baseline|context-broker|owner-model|corrections|api|root)\b|better-sqlite3|drizzle/,
+  ],
+  [
+    'SQL write or transaction control',
+    /\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX)\b/,
+  ],
+  [
+    'direct connection control',
+    /\.(exec|run|iterate|transaction|pragma|backup|serialize|close|function|aggregate|table|loadExtension|unsafeMode|defaultSafeIntegers)\s*\(/,
+  ],
+  ['other Ledger operations', /\b(listEvents|replayEvents|inspectIntegrity)\b/],
+  ['connection lifecycle', /\b(openStorage|migrate)\b/],
+  // Timestamps are ordered exactly (Codex F1): no millisecond Date values.
+  ['Date-based time arithmetic', /\bDate\b/],
+  [
+    'connection access other than prepare and inTransaction',
+    /\.sqlite\.(?!prepare\(|inTransaction\b)/,
+  ],
+];
+
 interface ImportClause {
   readonly module: string;
   readonly names: string[];
@@ -115,13 +185,43 @@ function violations(file: string, text: string): string[] {
   return errors;
 }
 
+function ledgerViolations(file: string, text: string): string[] {
+  const errors: string[] = [];
+  for (const { module, names } of importsOf(text)) {
+    if (module.startsWith('.')) {
+      if (!LEDGER_LOCAL.includes(module))
+        errors.push(`${file}: unknown local module ${module}`);
+      continue;
+    }
+    const rule = LEDGER_PERMITTED[module];
+    if (!rule || !rule.files.includes(file)) {
+      errors.push(`${file}: import from ${module}`);
+      continue;
+    }
+    for (const name of names)
+      if (!rule.names.includes(name))
+        errors.push(`${file}: ${name} from ${module}`);
+  }
+  for (const [label, pattern] of LEDGER_FORBIDDEN)
+    if (pattern.test(text)) errors.push(`${file}: ${label}`);
+  const appends = text.match(/\bappendEvent\b/g)?.length ?? 0;
+  if (appends !== (file === 'record.ts' ? 1 : 0))
+    errors.push(`${file}: ${appends} appendEvent calls`);
+  return errors;
+}
+
 describe('pure root entry: static boundaries', () => {
-  it('contains exactly the Patch 2 modules and no subpath yet', () => {
+  it('contains exactly the root modules and the ledger subpath', () => {
     const entries = readdirSync(srcDir, { withFileTypes: true });
-    expect(entries.filter((e) => e.isDirectory()).map((e) => e.name)).toEqual(
-      [],
-    );
-    expect(entries.map((e) => e.name).sort()).toEqual(SRC_FILES);
+    expect(entries.filter((e) => e.isDirectory()).map((e) => e.name)).toEqual([
+      'ledger',
+    ]);
+    expect(
+      entries
+        .filter((e) => e.isFile())
+        .map((e) => e.name)
+        .sort(),
+    ).toEqual(SRC_FILES);
   });
 
   it.each(SRC_FILES)('%s imports and calls only what is permitted', (file) => {
@@ -154,7 +254,7 @@ describe('pure root entry: static boundaries', () => {
     expect(violations(file, sample).length).toBeGreaterThan(0);
   });
 
-  it('exports exactly the accepted API', () => {
+  it('exports exactly the accepted root API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([
       'ACTION_PROPOSALS_CONFIG',
       'ACTION_PROPOSAL_CREATION_COMPONENT',
@@ -201,18 +301,102 @@ describe('pure root entry: static boundaries', () => {
   });
 });
 
+describe('./ledger subpath: static boundaries', () => {
+  it('contains exactly the Patch 3 modules', () => {
+    const entries = readdirSync(ledgerDir, { withFileTypes: true });
+    expect(entries.every((e) => e.isFile())).toBe(true);
+    expect(entries.map((e) => e.name).sort()).toEqual(LEDGER_FILES);
+  });
+
+  it.each(LEDGER_FILES)(
+    '%s imports and calls only what is permitted',
+    (file) => {
+      expect(ledgerViolations(file, ledgerSourceOf(file))).toEqual([]);
+    },
+  );
+
+  it('uses only pinned, owner-scoped SELECT statements', () => {
+    const statements = [
+      ...Object.values(READ_SQL),
+      ...Object.values(PRECHECK_SQL),
+    ];
+    expect(statements).toHaveLength(7);
+    for (const sql of statements) {
+      expect(sql).toMatch(
+        /^SELECT [^;]+ FROM [a-z_]+ WHERE owner_id = \?( |$)/,
+      );
+      expect(sql).not.toMatch(/;|--|\/\*/);
+    }
+    expect(Object.isFrozen(READ_SQL) && Object.isFrozen(PRECHECK_SQL)).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['record.ts', `import { openStorage } from '@aven/storage';`],
+    ['record.ts', `import { migrate } from '@aven/storage';`],
+    ['record.ts', `import { serializeContract } from '@aven/storage';`],
+    ['stored.ts', `import { z } from 'zod';`],
+    ['record.ts', `import { x } from '@aven/runtime';`],
+    ['record.ts', `import { x } from '@aven/corrections/ledger';`],
+    ['record.ts', `import { PolicyDecisionSchema } from '@aven/contracts';`],
+    ['record.ts', `import Database from 'better-sqlite3';`],
+    ['record.ts', `import { x } from '../ledger-extra.ts';`],
+    ['index.ts', `import { createLedger } from '@aven/ledger';`],
+    ['record.ts', `storage.sqlite.exec('BEGIN IMMEDIATE');`],
+    ['record.ts', `db.run();`],
+    ['record.ts', `storage.sqlite.transaction(() => 1)();`],
+    ['record.ts', `const q = 'INSERT INTO owners VALUES (?)';`],
+    ['record.ts', `const q = 'DELETE FROM tasks';`],
+    ['record.ts', `storage.sqlite.pragma('foreign_keys = OFF');`],
+    ['record.ts', `const open = storage.sqlite.open;`],
+    ['stored.ts', `ledger.appendEvent(event);`],
+    ['record.ts', `ledger.listEvents();`],
+    ['record.ts', `const t = new Date().toISOString();`],
+    [
+      'record.ts',
+      `if (Date.parse(a) > Date.parse(b)) fail('timestamp_order');`,
+    ],
+    ['record.ts', `const t = Date.UTC(2026, 9, 14);`],
+    ['record.ts', `const r = randomUUID();`],
+    ['record.ts', `console.log('x');`],
+  ])('rejects the known-bad sample %# in %s', (file, sample) => {
+    const text =
+      file === 'record.ts' ? `${sample}\nledger.appendEvent(e);` : sample;
+    expect(ledgerViolations(file, text).length).toBeGreaterThan(0);
+  });
+
+  it('flags a second append in the recorder', () => {
+    expect(
+      ledgerViolations('record.ts', 'l.appendEvent(a);\nl.appendEvent(b);'),
+    ).toEqual(['record.ts: 2 appendEvent calls']);
+  });
+
+  it('exports exactly the recorder and reconciliation', () => {
+    expect(Object.keys(ledgerApi).sort()).toEqual([
+      'reconcileActionProposalRecording',
+      'recordActionProposal',
+    ]);
+  });
+});
+
 describe('package manifest and dependency direction', () => {
   const manifest = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
   ) as Record<string, unknown>;
 
-  it('declares only the root entry and the permitted dependencies', () => {
+  it('declares only the two entries and the permitted dependencies', () => {
     expect(manifest.name).toBe('@aven/action-proposals');
     expect(manifest.private).toBe(true);
     expect(manifest.type).toBe('module');
-    expect(manifest.exports).toEqual({ '.': './src/index.ts' });
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './ledger': './src/ledger/index.ts',
+    });
     expect(manifest.dependencies).toEqual({
       '@aven/contracts': 'workspace:*',
+      '@aven/ledger': 'workspace:*',
+      '@aven/storage': 'workspace:*',
       zod: '4.6.5',
     });
     expect(manifest.devDependencies).toEqual({

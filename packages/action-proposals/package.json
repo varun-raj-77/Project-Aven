@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-011 Action Proposal Boundary (Patch 2): pure construction, validation, canonical digest v1, binding and authority-neutral inspection of AVEN-002 action proposals. No Ledger write, Root decision, approval, tool execution, model call or learning",
+  "description": "AVEN-011 Action Proposal Boundary: pure construction, validation, canonical digest v1, binding and authority-neutral inspection of AVEN-002 action proposals (root); ./ledger records one validated proposal through one frozen Ledger append and reconciles an uncertain outcome read-only. No Root decision, approval, tool execution, model call or learning",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ledger": "./src/ledger/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
@@ -13,6 +14,8 @@
   },
   "dependencies": {
     "@aven/contracts": "workspace:*",
+    "@aven/ledger": "workspace:*",
+    "@aven/storage": "workspace:*",
     "zod": "4.6.5"
   },
   "devDependencies": {
