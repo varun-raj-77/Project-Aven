@@ -1,14 +1,17 @@
 # AVEN-011 report: Action Proposal Boundary
 
-Status: **in progress on the isolated branch `aven-011/action-proposals`.
-Patches 1-5 were independently reviewed, accepted and committed by the owner,
-and GitHub CI passed on Patches 2-5. Patch 6 (this report and the status
-reconciliation) is a candidate pending independent review. AVEN-011 is not
-accepted as a milestone, not merged, not frozen and not tagged.** `main` remains
-at the AVEN-011 baseline `c8b83ec`, and no `aven-011` tag exists. Recording the
-acceptance of Patch 6, its commit identifier or a freeze requires a later
-reviewed change made after those events. No model was called. Nothing in this
-report is an experimental result, and no C-versus-B claim is made.
+Status recorded **2026-10-15 after Patch 6 acceptance and CI**: **all six
+AVEN-011 implementation patches were independently reviewed, accepted and
+committed by the owner on `aven-011/action-proposals`. The accepted Patch 6
+commit is `dd00d430b8ec6595415959fc5bcb0bfefaf3ca97`; GitHub CI passed on
+Patches 2-6, including Patch 6 run `38762243518`.** The owner separately
+authorized final acceptance, merging and tagging. **This report amendment is a
+candidate finalization record**: as of its preparation `main` still points to
+`c8b83ec`, the branch tip is `dd00d430`, and no `aven-011` tag exists. The
+milestone is not yet merged or frozen; a separately reviewed amendment, actual
+fast-forward into `main`, and an immutable annotated `aven-011` tag with
+post-operation verification remain necessary. No model was called. Nothing in
+this report is an experimental result, and no C-versus-B claim is made.
 
 Baseline: `c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be` (owner-first attribution
 policy on `main`), above frozen AVEN-010 (tag `aven-010`, commit
@@ -65,7 +68,7 @@ recording.
 | Patch 3                          | `2e84dbc982a7444f4d33f2e4b744f2d1a939655f` | Recorder and reconciliation                         |
 | Patch 4                          | `9bd2ad744f8c717ddaf37802629ad4bdb0137362` | Read-only historical reader                         |
 | Patch 5                          | `f49451160e2d4e0eb4fd4f86c6498403481a9ff4` | Cross-layer campaign (tests only)                   |
-| Patch 6                          | not yet committed                          | Candidate: this report and status reconciliation    |
+| Patch 6                          | `dd00d430b8ec6595415959fc5bcb0bfefaf3ca97` | Final report and status reconciliation, accepted    |
 
 Every AVEN-011 commit has the owner as author and committer and exactly one
 final trailer, `Co-authored-by: Claude <noreply@anthropic.com>`. Claude prepares
@@ -117,7 +120,7 @@ is advisory.
 | 3     | Recorder and reconciliation; review finding F1 corrected before commit | Accepted, committed `2e84dbc`, CI passed (independent) |
 | 4     | Read-only historical reader                                            | Accepted, committed `9bd2ad7`, CI passed (independent) |
 | 5     | Cross-layer adversarial and regression campaign (tests only)           | Accepted, committed `f494511`, CI passed (independent) |
-| 6     | This report and status reconciliation (documentation and description)  | Candidate, pending independent review                  |
+| 6     | This report and status reconciliation (documentation and description)  | Accepted, committed `dd00d43`, CI passed (independent) |
 
 Patches 4, 5 and 6 were prepared together as separate candidates. Each is
 reviewed and committed on its own, in order.
@@ -369,8 +372,8 @@ Running scripts through `pnpm run` may trigger pnpm 11's reinstall and edit
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Check                                                       | Scope                                                                                            | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Class                                               |
 | ---                                                         | ---                                                                                              | ---                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | ---                                                 |
-| Codex review                                                | Patches 1-5                                                                                      | accepted (Patch 3 after the F1 correction)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Independent                                         |
-| GitHub CI (`Verify historical and owner-first attribution`) | committed Patches 2, 3, 4 (`9bd2ad7`) and 5 (`f494511`)                                          | passed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | GitHub CI                                           |
+| Codex review                                                | Patches 1-6                                                                                      | accepted (Patch 3 after the F1 correction)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Independent                                         |
+| GitHub CI (`Verify historical and owner-first attribution`) | committed Patches 2-6, including 6 (`dd00d43`)                                                   | passed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | GitHub CI                                           |
 | `pnpm check`, Linux, Node 24.21.0, pnpm 11.19.0             | Patch 4 candidate (byte-identical to the committed `9bd2ad7`)                                    | passed: 2,019 tests in 57 files                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Builder-reported                                    |
 | `pnpm check`, same environment                              | Patch 5 candidate (byte-identical to the committed `f494511`)                                    | passed: 2,066 tests in 58 files (363 in this package)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Builder-reported                                    |
 | `pnpm check`, same environment                              | Patch 6 candidate on `f494511`                                                                   | passed (see the Patch 6 handoff); Patch 6 changes no code or test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Builder-reported                                    |
@@ -378,8 +381,9 @@ Running scripts through `pnpm run` may trigger pnpm 11's reinstall and edit
 | Windows x64, Node 24.19.0                                   | revised Patch 3 candidate                                                                        | passed: 1,973 tests in 56 files (270 in this package); 37 focused timestamp regressions; 14,108 independent timestamp comparisons; formatting, all 11 TypeScript checks and experiment validation; T's evaluator and self-test. Full suite with `--maxWorkers=2 --testTimeout=30000`, using the pinned installed tool entry points, not a fresh pnpm installation or the literal `pnpm check` command                                                                                                                                                     | Independent                                         |
 | Windows, Node 24.19.0                                       | Patches 4-6 candidates combined                                                                  | passed: 2,066 tests in 58 files (363 in this package), including all 47 cross-layer tests; 17 independent classification cases and 288 SQL-backed pagination comparisons; formatting, all 11 TypeScript checks and experiment validation; T's governance rehearsal for all three candidates, including `--governance-frozen-at T`. Two Vitest workers, 30-second timeout, the existing six test exclusions and the already installed pinned dependencies; no fresh pnpm installation. These validate candidates; they are not CI on a real Patch 6 commit | Independent                                         |
 | Frozen tripwire suites excluded from `pnpm check`           | accepted base, Patch 5 and Patch 6 candidate                                                     | 190 passed and the same six failed (of 196) at each, in a controlled comparison. The six reflect obsolete frozen expectations, not new source regressions. A seventh failure seen in one run was reproduced as a dependency or worktree-link artifact. No frozen test was edited and no exclusion was added                                                                                                                                                                                                                                               | Independent; matches the builder's Linux comparison |
-| Independent review of Patch 6                               | candidate                                                                                        | **pending**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Pending                                             |
-| GitHub CI and T's gate on the real Patch 6 commit           | not yet committed                                                                                | **pending**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Pending                                             |
+| Independent review of Patch 6                               | revised candidate `e9fe0519...`                                                                  | **approved**; no actionable findings in 2026-10-15 independent Codex audit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Independent                                         |
+| GitHub CI on the real Patch 6 commit                        | `dd00d430` (run `38762243518`)                                                                   | **passed**; owner-first attribution, current-tree and frozen AVEN-010 checks all succeeded                                                                                                                                                                                                                                                                                                                                                                                                                                                                | GitHub CI                                           |
+| Original T's gate on real Patch 6                           | `dd00d430` using trusted T `3761c77`, with `--governance-frozen-at T`                            | **passed** in Codex's independent status review; evaluator hashes verified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Independent                                         |
 | Real-model or end-to-end experiment                         | out of scope                                                                                     | not run; `execution: not_run` stays unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | n/a                                                 |
 
 Test counts: the pre-AVEN-011 suite had 1,703 tests. Patch 2 brought it to
@@ -437,14 +441,26 @@ AVEN-011 hands Root **inputs, not conclusions**. Root must:
 
 Nothing in AVEN-011 constrains Root's policy model.
 
-## P. Remaining steps before freeze
+## P. Finalization record and remaining freeze steps
 
-1. Independent review of Patch 6. Corrections, if any, are made before its
-   commit.
-2. The owner applies and commits the accepted Patch 6 as author and committer,
-   with the single co-author trailer.
-3. That commit passes T's gate with `--governance-frozen-at T` and GitHub CI.
-4. A later reviewed change records Patch 6's acceptance, its commit identifier
-   and the final status.
-5. Merging to `main` and creating the `aven-011` tag require separate, explicit
-   owner authorization.
+1. **Complete.** Patch 6 was independently approved (SHA-256
+   `e9fe051994a447b6d35bb7a3294988301c0f9850d39fdb7229eadb94f0f88f71`),
+   owner-authored and owner-committed as
+   `dd00d430b8ec6595415959fc5bcb0bfefaf3ca97`.
+2. **Complete.** Its GitHub Actions run `38762243518` passed. The successful
+   workflow included owner-first historical attribution, post-freeze
+   current-tree checks and unchanged frozen AVEN-010 checks. This workflow is
+   the actual committed-tree CI; synthetic T rehearsals are separately labeled
+   above.
+3. **Complete.** The owner explicitly authorized milestone acceptance, merging
+   and tagging after all six reviewed commits and CI checks passed.
+4. **Pending as of this amendment.** Independently review this post-Patch-6
+   status-only change and, if approved, commit it linearly under the owner-first
+   policy with the required single Claude trailer. Recheck real-commit CI and
+   the trusted evaluator T with `--governance-frozen-at T`.
+5. **Pending as of this amendment.** Fast-forward `main` without squashing,
+   rebasing or rewriting accepted commits; create annotated `aven-011` pointing
+   to the final reviewed milestone commit; verify both refs and tag object.
+
+The pending steps above are **not claimed as completed** by this report. This is
+an as-of acceptance record, not retroactive evidence that a merge or tag exists.
