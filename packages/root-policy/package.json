@@ -1,0 +1,23 @@
+{
+  "name": "@aven/root-policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AVEN-012 Root Policy Gateway: pure Root policy engine (root) that revalidates AVEN-011 proposals and returns frozen AVEN-002 ALLOW, DENY or REQUIRE_OWNER_APPROVAL decisions from Root-controlled policy, grants and verified approvals; ./testing holds the synthetic approval capability. No recording, tool execution, model call or learning",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --configLoader native --root ../.. --config vitest.config.ts packages/root-policy/test"
+  },
+  "dependencies": {
+    "@aven/contracts": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
