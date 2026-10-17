@@ -11,7 +11,7 @@ owner-first attribution policy was merged to `main` at
 `c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be`, the AVEN-011 baseline. Wherever an
 older section below names the AVEN-010 branch, AVEN-010-only authorization or
 Claude as commit author, it is historical; current authorization is in the
-AVEN-011 section.
+AVEN-012 section.
 
 For every subsequent Claude-assisted commit, author AND committer must be the
 owner, `Varun Karthik` (or `varun-raj-77`), using either verified
@@ -26,11 +26,77 @@ Before pushing new commits run `pnpm attribution:self-test`,
 `pnpm attribution:check`, `pnpm check`, and inspect
 `git show -s --format=fuller HEAD`. **Never waive a failed attribution gate.**
 The combined gate audits the old frozen 16 commits with the original evaluator
-and enforces owner-first identity for all commits after AVEN-010; for AVEN-011
-it also enforces the exact versioned file governance `aven-011-governance-v1`.
-For details see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`.
+and enforces owner-first identity for all commits after AVEN-010; it also
+enforces the exact versioned file governance: `aven-011-governance-v1` for the
+history and AVEN-011 eras (closed at the `aven-011` tag) and
+`aven-012-governance-v1` for AVEN-012. For details see
+`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`.
 
-## AVEN-011 authorization and working plan
+## AVEN-012 authorization and working plan
+
+**AVEN-011 was accepted and frozen**: annotated tag `aven-011` (tag object
+`56a0e883b17b03be080af50ce5f60c692d409b83`) and `main` at
+`44ba416d90624be67fde2fab31c716e8298648bb`. The owner authorized **AVEN-012, the
+Root Policy Gateway**, as one development batch of **four separately reviewable
+patches**, each independently reviewed and separately committed by the owner, in
+order, on the isolated branch `aven-012/root-policy-gateway` (created from
+`44ba416`). That authorization accepted, committed and froze nothing. Claude
+prepares each patch and commit-message draft outside the tracked tree and never
+commits, pushes, merges or tags; the owner applies, reviews, commits as author
+and committer, and pushes. Never merge the branch into `main` during the
+milestone, tag it, squash, rebase, rewrite accepted commits or force-push. If
+`main` moves during AVEN-012, stop and ask. Do not begin AVEN-013.
+
+Aven proposes; Root decides. AVEN-012 adds one package, `packages/root-policy`
+(`@aven/root-policy`), that reuses the frozen AVEN-002 action, approval and
+policy-decision contracts unchanged and returns `ALLOW`, `DENY` or
+`REQUIRE_OWNER_APPROVAL`. It grants no tool execution capability, adds no real
+authentication, writes no owner state and learns nothing. Patches (the gate
+enforces the exact file inventory):
+
+1. Governance: the successor gate (`aven-012-governance-v1`), its policy
+   document, the CI workflow (which also runs the unchanged AVEN-011 checks at
+   the `aven-011` tag) and this file. **Candidate.**
+2. Pure Root policy engine: Root-controlled policy definitions, independent
+   AVEN-011 v1 revalidation, approval verification and deterministic evaluation.
+   **Candidate.**
+3. Approval checks and audited recording: read-only evaluation of recorded
+   proposals at the Root clock, one frozen Ledger `policy_decision` append and
+   read-only reconciliation. **Candidate.**
+4. Adversarial campaign and the AVEN-012 report, with status reconciliation.
+   **Candidate.**
+
+Trusted evaluator: T's gate (`3761c77`) with `--governance-frozen-at T`
+deliberately rejects Patch 1, which changes the governance files; that refusal
+is the guard working and is never bypassed or presented as approval. Patch 1 is
+judged as an independently reviewed governance transition (procedure in
+`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). Only after the owner-created Patch 1
+commit is independently accepted does its SHA become the AVEN-012 trusted
+reference `T12`; reviewers then run `T12`'s gate, not the candidate's, against
+Patches 2 to 4 with `--governance-frozen-at T12`. Candidate CI is advisory.
+
+Design boundaries of the AVEN-012 candidates:
+
+- Root depends on `@aven/contracts`, `zod` and, in its `./ledger` subpath, the
+  frozen Ledger and storage; never on `@aven/action-proposals` (a frozen
+  AVEN-011 tripwire forbids any other package from depending on it). Root
+  re-implements the AVEN-011 v1 rules and digest, pinned by its golden vectors.
+- Policy rules, risk classification, the action catalog, grants, issuer
+  identity, policy version and evaluation time are Root-controlled; nothing in a
+  proposal, including requested authority, declared risk, origin and cited
+  approvals, is authority. Unknown, conflicting, unclassified or forbidden
+  requests are `DENY`; low risk is `ALLOW` only on a matching Root grant;
+  approval-based `ALLOW` requires a verified approval vouched for by a Root-held
+  authentication capability, and the only one in AVEN-012 is a synthetic test
+  capability, so no production approval trust is claimed.
+- Evaluation, decision recording and (future, AVEN-013) execution stay separate.
+  A recorded decision is never a standing permission; a future executor must
+  recheck the real parameter bytes and Root's decision at use.
+- An in-process prototype is not OS-level security isolation.
+
+## AVEN-011 authorization and working plan (historical)
+
+Historical record: AVEN-011 is accepted and frozen at `aven-011` (`44ba416`).
 
 AVEN-011 is the **Action Proposal Boundary**. The accepted design reuses the
 frozen AVEN-002 contracts (`ActionProposalSchema`, `ProposalBindingSchema`,

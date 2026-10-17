@@ -56,3 +56,17 @@ jobs:
             bash -e -c "$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).scripts.check)')"
             node tooling/attribution/check-attribution.ts
           )
+      - name: Run unchanged AVEN-011 checks at frozen tag
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/aven011" refs/tags/aven-011
+          (
+            cd "$RUNNER_TEMP/aven011"
+            cp pnpm-workspace.yaml "$RUNNER_TEMP/aven011-workspace.original"
+            printf '\nallowBuilds:\n  better-sqlite3: true\n  esbuild: true\n' >> pnpm-workspace.yaml
+            pnpm install --frozen-lockfile
+            cp "$RUNNER_TEMP/aven011-workspace.original" pnpm-workspace.yaml
+            git diff --exit-code -- pnpm-workspace.yaml
+            export PATH="$PWD/node_modules/.bin:$PATH"
+            bash -e -c "$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).scripts.check)')"
+            node tooling/attribution/check-post-aven010.mjs --governance-frozen-at 3761c775b5650e353816b3395e4d71022398afd1
+          )

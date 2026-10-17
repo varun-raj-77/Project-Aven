@@ -1,9 +1,12 @@
 # Post-AVEN-010 owner-first commit attribution
 
 Status: owner-authorized attribution-policy maintenance, merged to `main` at
-`c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be`, extended by the AVEN-011 Patch 1
-candidate with file governance for the AVEN-011 milestone (gate version
-`aven-011-governance-v1`). The frozen `aven-010` tag and all earlier commit IDs
+`c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be`, extended by AVEN-011 Patch 1
+(`3761c775b5650e353816b3395e4d71022398afd1`) with file governance for the
+AVEN-011 milestone (gate version `aven-011-governance-v1`), and extended by the
+**AVEN-012 Patch 1 candidate** with a successor era for the AVEN-012 milestone
+(gate version `aven-012-governance-v1`; see "AVEN-012 successor governance"
+below). The frozen `aven-010` and `aven-011` tags and all earlier commit IDs
 remain unchanged. This document supersedes the AVEN-010-specific D11 authorship
 choice **only for commits after** `76535d8647ee36e56bd2efd1a86642d1fc572ee7`.
 
@@ -69,12 +72,15 @@ email policy intentionally rejects GitHub's authenticated noreply alias.
 
 ## AVEN-011 file governance (`aven-011-governance-v1`)
 
-The gate audits every commit after `aven-010` in two eras. The **history era**
-is the 28 maintenance commits up to and including the baseline `c8b83ec`, which
-is pinned and must be an ancestor of `HEAD`. The **AVEN-011 era** is every
-commit after the baseline. Two separate comparisons run at **every** post-freeze
-commit, not only at the branch tip, so a temporary unauthorized change that a
-later commit restores is still rejected:
+This section describes the AVEN-011 rules as accepted. The AVEN-012 gate keeps
+applying them, unchanged, to the history and AVEN-011 eras (now closed by the
+`aven-011` tag); see the next section for the AVEN-012 era. The AVEN-011 gate
+audited every commit after `aven-010` in two eras. The **history era** is the 28
+maintenance commits up to and including the baseline `c8b83ec`, which is pinned
+and must be an ancestor of `HEAD`. The **AVEN-011 era** is every commit after
+the baseline. Two separate comparisons run at **every** post-freeze commit, not
+only at the branch tip, so a temporary unauthorized change that a later commit
+restores is still rejected:
 
 - **Cumulative** status: `aven-010` against the checked commit.
 - **Per-commit** status: the checked commit against its single parent.
@@ -125,12 +131,104 @@ Content states, checked at every AVEN-011-era commit against the baseline:
   `@aven/storage` (Patch 3), plus `zod` 4.6.5, `typescript` 5.9.3 and `vitest`
   4.0.18. Patch 1 is P0 and L0.
 
+## AVEN-012 successor governance (`aven-012-governance-v1`)
+
+AVEN-011 is frozen at the annotated tag `aven-011` (tag object
+`56a0e883b17b03be080af50ce5f60c692d409b83`, commit
+`44ba416d90624be67fde2fab31c716e8298648bb`), the seventh commit after its
+baseline. The AVEN-012 Patch 1 gate judges every commit after `aven-010` in
+three eras:
+
+| Era                   | Commits                                           | Rules                                                                      |
+| --------------------- | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| History (maintenance) | the 28 commits through the baseline `c8b83ec`     | unchanged historical maintenance allowlist                                 |
+| AVEN-011 (closed)     | exactly the 7 commits after `c8b83ec` through tag | unchanged `aven-011-governance-v1`, trusted reference `3761c77` **pinned** |
+| AVEN-012 (open)       | every commit after `aven-011`                     | `aven-012-governance-v1` below, judged against the `aven-011` tree         |
+
+The gate additionally requires the annotated `aven-011` tag at its pinned tag
+object and commit, `c8b83ec` -> `aven-011` -> `HEAD` ancestry, exactly seven
+AVEN-011-era commits and no governance change in the AVEN-011 era after
+`3761c77`. The 16 frozen AVEN-009-to-010 commits are still judged by the
+unchanged original evaluator, and every later commit by the owner-first rule.
+
+AVEN-012 era, cumulative statuses against `aven-011` (exact paths, no
+wildcards):
+
+| Path                                            | Cumulative | Notes                                     |
+| ----------------------------------------------- | ---------- | ----------------------------------------- |
+| the three governance files                      | M          | governance-only commits (and `AGENTS.md`) |
+| `AGENTS.md`, `README.md`, `docs/ROADMAP.md`     | M          | shared                                    |
+| `package.json`, `pnpm-lock.yaml`                | M          | states Q0/Q1 and K0/K1 only               |
+| `docs/AVEN_012_REPORT.md`                       | A          | AVEN-012 report                           |
+| the 33 enumerated `packages/root-policy/` files | A          | listed in the gate, by patch              |
+
+Everything else that exists at `aven-011` is frozen, including every AVEN-011
+file, every earlier milestone, `tooling/attribution/attribution.ts`, the
+`packages/root/` placeholder and all frozen tests. The allowlist data cannot
+open a frozen file on its own: the gate fails unless every added path is absent
+from the `aven-011` tree and every modified path is one of the five shared files
+or the three governance files. Per-commit statuses: governance and shared files
+`M` only (governance files only in governance-only commits); report and package
+files `A` when their parent lacks them and `M` afterwards; deletions, renames,
+type changes and any mode other than `100644` are always rejected.
+
+Content states, checked at every AVEN-012-era commit against `aven-011`:
+
+- `package.json` is **Q0** (byte-identical to `aven-011`) or **Q1**: the
+  canonical two-space-JSON rendering with only the approved AVEN-012 description
+  and/or the single insertion of
+  ` && tsc --project packages/root-policy/tsconfig.json --noEmit` immediately
+  after the action-proposals project check in **both** `scripts.typecheck` and
+  `scripts.check`. Test exclusions, dependencies and every other field stay
+  identical, so the six historical test exclusions cannot change.
+- `pnpm-lock.yaml` is **K0** (byte-identical) or **K1**: exactly one
+  `packages/root-policy` importer block inserted immediately before
+  `packages/runtime`, in the exact pnpm 11.19.0 rendering, linking only
+  `@aven/contracts` (Patch 2) or `@aven/contracts`, `@aven/ledger` and
+  `@aven/storage` (Patch 3), plus `zod` 4.6.5, `typescript` 5.9.3 and `vitest`
+  4.0.18. It can never link `@aven/action-proposals`.
+
+Patch 1 is Q0 and K0.
+
+### Why this is a governance transition, and how it is legitimised
+
+The AVEN-011 trusted reference T (`3761c77`) forbids, by design, any change to a
+governance file after T when its gate runs with `--governance-frozen-at T`.
+AVEN-012 Patch 1 changes all three governance files, so **T's gate in that mode
+rejects it** (`governance_change_after_trusted_reference`), and it also rejects
+Patches 2 to 4, whose files the AVEN-011 allowlist does not name. That failure
+is the guard working; it is not bypassed, and the old frozen-at-T mode does
+**not** approve this amendment. The new gate also refuses `3761c77` as a trusted
+reference for the open era ("is not an AVEN-012 milestone commit").
+
+The transition is legitimised instead by:
+
+1. **Independent review of Patch 1 as a governance-only change** (gate, this
+   document, the CI workflow and `AGENTS.md`; no other file).
+2. **Preservation evidence:** the new gate passes on the real history at
+   `aven-011` with every prior invariant re-checked (frozen evaluator for the 16
+   commits, pinned tags `aven-009`, `aven-010` and `aven-011`, unchanged history
+   and AVEN-011 rules, pinned AVEN-011 trusted reference); its self-test re-runs
+   the complete unchanged AVEN-011-era campaign (6 controls, 54 single-defect
+   violations) next to the new AVEN-012-era campaign.
+3. **The shape check T's gate can still give:** run without the frozen option,
+   T's gate accepts the Patch 1 commit as a governance-only commit with
+   unchanged `package.json` and lockfile. That shows only that Patch 1 touches
+   nothing but governance files; it is not an approval of the new content.
+4. **A new trusted reference only after acceptance:** once the owner-created
+   Patch 1 commit is independently accepted, its exact SHA becomes the AVEN-012
+   trusted reference `T12`. Patches 2 to 4 are then evaluated with the gate from
+   `T12`, run with `--governance-frozen-at T12`. No commit before that
+   acceptance is a trusted reference.
+
 ## Trusted evaluator for the isolated milestone branch
 
-AVEN-011 patches are committed by the owner on the isolated branch
-`aven-011/action-proposals`, never merged into `main` during the milestone.
+AVEN-011 patches were committed by the owner on the isolated branch
+`aven-011/action-proposals`; AVEN-012 patches are committed on
+`aven-012/root-policy-gateway`, neither merged into `main` during its milestone.
 Candidate CI is advisory: a candidate can change its own gate and workflow. A
-reviewer therefore runs a **trusted** copy of the gate on their own machine:
+reviewer therefore runs a **trusted** copy of the gate on their own machine.
+Historical AVEN-011 procedure:
 
 - Patch 1 is evaluated with the gate from the baseline `c8b83ec` (blob
   `d909d3ea9fb3967b3d2311998f0158ff586aba53`).
@@ -165,6 +263,25 @@ disposable worktree do not affect what is evaluated. The successor gate prints
 the Git blob IDs of the evaluator files it loaded; compare them with `T`. The
 final `diff-tree` must list exactly the accepted file inventory of that patch.
 
+AVEN-012 procedure (`X` is the candidate commit, `V11` is
+`44ba416d90624be67fde2fab31c716e8298648bb`):
+
+- **Patch 1** (no AVEN-012 trusted reference exists yet): verify
+  `git rev-parse aven-011` is `56a0e883b17b03be080af50ce5f60c692d409b83` and
+  `git rev-parse aven-011^{commit}` is `V11`; check `X`'s parent is `V11` and
+  `git diff-tree -r --no-renames --name-status V11 X` lists exactly the three
+  governance files and `AGENTS.md` (all `M`); run T's gate (from `3761c77`, blob
+  `8fe769e70143b513da83ebccece0da3a9fb22a93`) **without** the frozen option for
+  the shape check, and run it **with**
+  `--governance-frozen-at 3761c775b5650e353816b3395e4d71022398afd1` only to
+  confirm the expected refusal; then run the candidate's own gate and
+  `--self-test` from a disposable worktree at `X` as preservation evidence, and
+  review the diff.
+- **Patches 2 to 4**: after Patch 1 is accepted and committed as `T12`, use the
+  procedure above with `T12` in place of `T` (ancestor checks against `V11` and
+  `T12`, evaluator files checked out from `T12`, blob IDs compared with `T12`,
+  and `--governance-frozen-at T12`).
+
 ## Frozen tests versus future tests
 
 AVEN-010's repository-layout and attribution tests deliberately assert exact
@@ -178,7 +295,10 @@ Future-checkout `pnpm test` excludes only six historically scoped test files:
 `tooling/tests/aven-008-frozen-layers.test.ts`,
 `tooling/tests/aven-009-frozen-layers.test.ts`, and
 `tooling/attribution/attribution.test.ts`. Every other existing functional test
-runs against the new checkout.
+runs against the new checkout. The AVEN-012 governance keeps exactly these six
+exclusions (state Q1 changes no test script). CI also runs the unchanged
+complete `check` and T's gate (`--governance-frozen-at 3761c77`) from an
+isolated checkout at annotated tag `aven-011`, as it does for `aven-010`.
 
 The successor gate separately verifies exact annotated tag objects, complete
 linear AVEN-009-to-010 attribution, owner-first commits after the tag, and the
@@ -190,12 +310,14 @@ review and a new trusted reference.
 `pnpm check` retains the MAINT-001 composition of format-check, typecheck,
 experiment-check and current-checkout tests. `pnpm attribution:check` is the
 separate mandatory postfreeze history gate. `pnpm attribution:self-test` runs
-the owner-first cases, CLI argument checks and a synthetic Git-history campaign
-(temporary repositories built with `git fast-import` under isolated Git
-configuration; each violation is a passing control plus one defect, run through
-the gate's CLI entry point in a child process). CI runs the checks and the
-historical full-suite check from the original tag; no historical assertions are
-deleted or weakened.
+the owner-first cases, direct state cases, CLI argument checks and a synthetic
+Git-history campaign (temporary repositories built with `git fast-import` under
+isolated Git configuration; each violation is a passing control plus one defect,
+run through the gate's CLI entry point in a child process, several children at a
+time). Since AVEN-012 it runs two campaigns: the unchanged open-AVEN-011-era
+campaign and the closed-AVEN-011 plus AVEN-012-era campaign. CI runs the checks
+and the historical full-suite checks from the original tags; no historical
+assertions are deleted or weakened.
 
 The post-freeze gate enforces owner author/committer identity and a Claude
 co-author trailer for the policy/AI-assisted series; if owner-only commits are
