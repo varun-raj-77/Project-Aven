@@ -1,7 +1,8 @@
 /**
  * Post-AVEN-010 owner-first attribution gate, extended by AVEN-011 Patch 1
- * with file governance for the AVEN-011 milestone. Frozen milestones are
- * read-only.
+ * with file governance for the AVEN-011 milestone and by AVEN-012 Patch 1
+ * with a successor era for the AVEN-012 milestone (governance version
+ * `aven-012-governance-v1`). Frozen milestones are read-only.
  *
  * It audits recorded Git metadata, trees and blobs only. It cannot
  * authenticate the person who operated Git, and it is tooling discipline, not
@@ -14,22 +15,33 @@
  * Frozen:     node tooling/attribution/check-post-aven010.mjs --governance-frozen-at <40-hex SHA>
  * Self-test:  node tooling/attribution/check-post-aven010.mjs --self-test
  *
+ * Eras after aven-010: the historical maintenance era (through the AVEN-011
+ * baseline), the closed AVEN-011 era (through the annotated `aven-011` tag)
+ * and the open AVEN-012 era (every later commit). The first two are judged
+ * exactly as `aven-011-governance-v1` judged them; the AVEN-011 era's
+ * accepted trusted reference is pinned, so no later change can reopen it.
+ *
  * Checks:
- *  1. complete (non-shallow) history; annotated aven-009 and aven-010 tags at
- *     their pinned commits and tag objects; aven-009 -> aven-010 -> AVEN-011
- *     baseline -> HEAD ancestry; one linear single-parent chain;
+ *  1. complete (non-shallow) history; annotated aven-009, aven-010 and
+ *     aven-011 tags at their pinned commits and tag objects; aven-009 ->
+ *     aven-010 -> AVEN-011 baseline -> aven-011 -> HEAD ancestry; one linear
+ *     single-parent chain;
  *  2. the 16 frozen AVEN-009..AVEN-010 commits with the unchanged evaluator;
  *  3. owner-first identity and exactly one Claude trailer on every later commit;
  *  4. at EVERY post-freeze commit: per-commit file statuses and modes (against
- *     its parent) and cumulative file statuses and modes (against aven-010),
- *     using the historical maintenance allowlist up to and including the
- *     AVEN-011 baseline and the AVEN-011 allowlist after it;
+ *     its parent) and cumulative file statuses and modes (against aven-010
+ *     through aven-011, and against aven-011 after it), using the historical
+ *     maintenance allowlist up to and including the AVEN-011 baseline, the
+ *     AVEN-011 allowlist through aven-011 and the AVEN-012 allowlist after it;
  *  5. governance files change only in governance-only commits;
- *  6. after the baseline: package.json in state P0/P1, pnpm-lock.yaml in state
- *     L0/L1, and, when requested, no governance change after the trusted
- *     reference.
+ *  6. in the AVEN-011 era: package.json in state P0/P1, pnpm-lock.yaml in
+ *     state L0/L1, exactly seven commits, and no governance change after the
+ *     pinned AVEN-011 trusted reference;
+ *  7. in the AVEN-012 era: package.json in state Q0/Q1, pnpm-lock.yaml in
+ *     state K0/K1 (both against aven-011) and, when requested, no governance
+ *     change after the trusted reference.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
 import {
@@ -42,20 +54,31 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { OWNER_CO_AUTHOR_TRAILER, evaluateCommit } from './attribution.ts';
 
 const V9 = '80057a217adb90132c5b6bc1c6a5c0f798db08c5';
 const V10 = '76535d8647ee36e56bd2efd1a86642d1fc572ee7';
+/** Frozen AVEN-011 milestone commit (annotated tag `aven-011`). */
+const V11 = '44ba416d90624be67fde2fab31c716e8298648bb';
 const TAG_OBJECTS = Object.freeze({
   'aven-009': 'adb32a0be958cd03be6af7534438fe37cd5af6ec',
   'aven-010': '4ef575c28f78504e77db8bb7d39df1ba8eda5041',
+  'aven-011': '56a0e883b17b03be080af50ce5f60c692d409b83',
 });
 /** Reviewed main tip before AVEN-011; the last commit judged as history. */
 const AVEN_011_BASELINE = 'c8b83ecbc8a1cae8cdb9e7a0de237fdf5bc1f2be';
-const GOVERNANCE_VERSION = 'aven-011-governance-v1';
+/**
+ * The accepted AVEN-011 trusted reference T (AVEN-011 Patch 1). Pinned: no
+ * governance file changed after it within the AVEN-011 era.
+ */
+const AVEN_011_TRUSTED = '3761c775b5650e353816b3395e4d71022398afd1';
+/** Accepted AVEN-011 commits after the baseline, through aven-011. */
+const AVEN_011_COUNT = 7;
+const AVEN_011_GOVERNANCE_VERSION = 'aven-011-governance-v1';
+const GOVERNANCE_VERSION = 'aven-012-governance-v1';
 /**
  * Historical post-freeze maintenance allowlist: path -> cumulative status
  * against aven-010. Unchanged; it governs every commit up to the baseline.
@@ -131,6 +154,82 @@ const LOCK_LINK_SETS = Object.freeze([
   ['contracts'],
   ['contracts', 'ledger', 'storage'],
 ]);
+const AVEN_011_PACKAGE_RULE = Object.freeze({
+  anchor: PACKAGE_ANCHOR,
+  insertion: PACKAGE_INSERTION,
+  description: AVEN_011_DESCRIPTION,
+});
+const AVEN_011_LOCK_RULE = Object.freeze({
+  importer: 'packages/action-proposals',
+  anchor: LOCK_ANCHOR,
+  linkSets: LOCK_LINK_SETS,
+});
+
+// ---------------------------------------------------------------------------
+// AVEN-012 file governance (`aven-012-governance-v1`), judged against the
+// frozen aven-011 tree. Everything present at aven-011 is frozen except the
+// shared files and the governance files, which may only be modified.
+
+/** The 33 package files of the accepted four-patch AVEN-012 plan, exactly. */
+const AVEN_012_PACKAGE_FILES = Object.freeze([
+  // Patch 2: the pure Root policy engine.
+  'packages/root-policy/package.json',
+  'packages/root-policy/tsconfig.json',
+  'packages/root-policy/README.md',
+  'packages/root-policy/src/index.ts',
+  'packages/root-policy/src/config.ts',
+  'packages/root-policy/src/errors.ts',
+  'packages/root-policy/src/inert.ts',
+  'packages/root-policy/src/canonical.ts',
+  'packages/root-policy/src/timestamps.ts',
+  'packages/root-policy/src/proposal.ts',
+  'packages/root-policy/src/policy.ts',
+  'packages/root-policy/src/authentication.ts',
+  'packages/root-policy/src/approvals.ts',
+  'packages/root-policy/src/evaluate.ts',
+  'packages/root-policy/src/testing/index.ts',
+  'packages/root-policy/test/fixtures.ts',
+  'packages/root-policy/test/boundaries.test.ts',
+  'packages/root-policy/test/errors.test.ts',
+  'packages/root-policy/test/timestamps.test.ts',
+  'packages/root-policy/test/proposal.test.ts',
+  'packages/root-policy/test/policy.test.ts',
+  'packages/root-policy/test/approvals.test.ts',
+  'packages/root-policy/test/evaluate.test.ts',
+  // Patch 3: approval checks and audited recording.
+  'packages/root-policy/src/ledger/index.ts',
+  'packages/root-policy/src/ledger/stored.ts',
+  'packages/root-policy/src/ledger/gateway.ts',
+  'packages/root-policy/src/ledger/record.ts',
+  'packages/root-policy/test/ledger-fixtures.ts',
+  'packages/root-policy/test/gateway.test.ts',
+  'packages/root-policy/test/record.test.ts',
+  'packages/root-policy/test/reconcile.test.ts',
+  // Patch 4: the adversarial campaign.
+  'packages/root-policy/test/adversarial-fixtures.ts',
+  'packages/root-policy/test/adversarial.test.ts',
+]);
+/** AVEN-012 allowlist: path -> cumulative status against aven-011. */
+const AVEN_012_DELTA = Object.freeze({
+  ...Object.fromEntries(GOVERNANCE_PATHS.map((path) => [path, 'M'])),
+  ...Object.fromEntries(SHARED_FILES.map((path) => [path, 'M'])),
+  'docs/AVEN_012_REPORT.md': 'A',
+  ...Object.fromEntries(AVEN_012_PACKAGE_FILES.map((path) => [path, 'A'])),
+});
+/** package.json Q1: the one approved script insertion and description. */
+const AVEN_012_DESCRIPTION =
+  'Aven experiment foundation, contracts, storage, AVEN-004 Experience Ledger, AVEN-005 local session API, AVEN-006 model runtime boundary, AVEN-007 A/B baselines with prebuilt eval dataset, AVEN-008 Context Broker, AVEN-009 Typed Owner Model, AVEN-010 correction events and AVEN-011 action-proposal boundary (frozen), with the AVEN-012 Root policy gateway';
+const AVEN_012_PACKAGE_RULE = Object.freeze({
+  anchor: 'tsc --project packages/action-proposals/tsconfig.json --noEmit',
+  insertion: ' && tsc --project packages/root-policy/tsconfig.json --noEmit',
+  description: AVEN_012_DESCRIPTION,
+});
+/** pnpm-lock.yaml K1: one importer block, inserted before packages/runtime. */
+const AVEN_012_LOCK_RULE = Object.freeze({
+  importer: 'packages/root-policy',
+  anchor: '\n  packages/runtime:\n',
+  linkSets: LOCK_LINK_SETS,
+});
 const OWNER_NAMES = new Set(['Varun Karthik', 'varun-raj-77']);
 const OWNER_EMAILS = new Set([
   'varunraj2117@gmail.com',
@@ -146,6 +245,9 @@ const REAL_CONFIG = Object.freeze({
   tagObjects: TAG_OBJECTS,
   baseline: AVEN_011_BASELINE,
   frozenCount: 16,
+  v11: V11,
+  aven011Trusted: AVEN_011_TRUSTED,
+  aven011Count: AVEN_011_COUNT,
 });
 const USAGE =
   'Usage: node tooling/attribution/check-post-aven010.mjs [--self-test | --governance-frozen-at <full 40-character commit SHA>]';
@@ -317,6 +419,35 @@ function aven011Allowlist(git, v10, delta) {
 }
 
 /**
+ * The AVEN-012 allowlist, judged against the frozen aven-011 tree and
+ * enforced in code like the AVEN-011 one: an addition must not exist at
+ * aven-011 (so no AVEN-011 or earlier file can be reopened by listing it),
+ * and a modification must name a shared or governance file present at
+ * aven-011. Every governance file must be listed as modified.
+ */
+function aven012Allowlist(git, v11, delta) {
+  const frozen = new Set(
+    git
+      .raw(['ls-tree', '-r', '-z', '--name-only', v11])
+      .split('\0')
+      .filter(Boolean),
+  );
+  const modifiable = [...SHARED_FILES, ...GOVERNANCE_PATHS];
+  for (const [path, status] of Object.entries(delta)) {
+    const valid =
+      status === 'A'
+        ? !frozen.has(path)
+        : status === 'M' && frozen.has(path) && modifiable.includes(path);
+    if (!valid)
+      throw new Error('allowlist_names_frozen_path: ' + status + ' ' + path);
+  }
+  for (const path of GOVERNANCE_PATHS)
+    if (delta[path] !== 'M')
+      throw new Error('allowlist_conflict: governance path ' + path);
+  return Object.freeze({ ...delta });
+}
+
+/**
  * Per-commit statuses (against the parent) derived from a cumulative
  * allowlist: an added path may be added (when its parent lacks it) and then
  * modified; a modified path may only be modified. After the baseline the
@@ -326,7 +457,7 @@ function perCommitTable(era, cumulative) {
   const table = {};
   for (const [path, status] of Object.entries(cumulative))
     table[path] =
-      GOVERNANCE_PATHS.includes(path) && era === 'aven011'
+      GOVERNANCE_PATHS.includes(path) && era !== 'history'
         ? ['M']
         : status === 'A'
           ? ['A', 'M']
@@ -384,9 +515,15 @@ const canonicalJson = (value) =>
 /**
  * P0: byte-identical to the baseline. P1: the canonical rendering of the
  * baseline with the approved description and/or the one approved insertion
- * in BOTH scripts.typecheck and scripts.check. Anything else: null.
+ * in BOTH scripts.typecheck and scripts.check. Anything else: null. The
+ * default rule is AVEN-011's (states P0/P1 against the AVEN-011 baseline);
+ * the AVEN-012 rule yields the same shapes against aven-011 (Q0/Q1).
  */
-export function packageJsonState(baseline, candidate) {
+export function packageJsonState(
+  baseline,
+  candidate,
+  rule = AVEN_011_PACKAGE_RULE,
+) {
   if (candidate.equals(baseline)) return 'P0';
   let base;
   try {
@@ -398,14 +535,14 @@ export function packageJsonState(baseline, candidate) {
     return null;
   const insert = (script) => {
     if (typeof script !== 'string') return null;
-    const at = script.indexOf(PACKAGE_ANCHOR);
-    if (at < 0 || script.indexOf(PACKAGE_ANCHOR, at + 1) >= 0) return null;
-    const end = at + PACKAGE_ANCHOR.length;
-    return script.slice(0, end) + PACKAGE_INSERTION + script.slice(end);
+    const at = script.indexOf(rule.anchor);
+    if (at < 0 || script.indexOf(rule.anchor, at + 1) >= 0) return null;
+    const end = at + rule.anchor.length;
+    return script.slice(0, end) + rule.insertion + script.slice(end);
   };
   const typecheck = insert(base?.scripts?.typecheck);
   const check = insert(base?.scripts?.check);
-  for (const description of [base?.description, AVEN_011_DESCRIPTION])
+  for (const description of [base?.description, rule.description])
     for (const inserted of [false, true]) {
       if (inserted && (typecheck === null || check === null)) continue;
       const variant = structuredClone(base);
@@ -419,9 +556,12 @@ export function packageJsonState(baseline, candidate) {
   return null;
 }
 
-/** The importer block pnpm 11.19.0 writes for packages/action-proposals. */
-function importerBlock(links) {
-  const lines = ['  packages/action-proposals:', '    dependencies:'];
+/**
+ * The importer block pnpm 11.19.0 writes for packages/action-proposals (or,
+ * under the AVEN-012 rule, packages/root-policy).
+ */
+function importerBlock(links, importer = AVEN_011_LOCK_RULE.importer) {
+  const lines = ['  ' + importer + ':', '    dependencies:'];
   for (const link of links)
     lines.push(
       `      '@aven/${link}':`,
@@ -448,21 +588,24 @@ function importerBlock(links) {
 /**
  * L0: byte-identical to the baseline. L1: the baseline with exactly one
  * approved importer block inserted immediately before `packages/baseline`.
- * Anything else: null.
+ * Anything else: null. The AVEN-012 rule yields the same shapes against
+ * aven-011 (K0/K1), with the block before `packages/runtime`.
  */
-export function lockfileState(baseline, candidate) {
+export function lockfileState(baseline, candidate, rule = AVEN_011_LOCK_RULE) {
   if (candidate.equals(baseline)) return 'L0';
   const text = baseline.toString('utf8');
-  const at = text.indexOf(LOCK_ANCHOR);
+  const at = text.indexOf(rule.anchor);
   if (
     at < 0 ||
-    text.indexOf(LOCK_ANCHOR, at + 1) >= 0 ||
-    text.includes('\n  packages/action-proposals:')
+    text.indexOf(rule.anchor, at + 1) >= 0 ||
+    text.includes('\n  ' + rule.importer + ':')
   )
     return null;
-  for (const links of LOCK_LINK_SETS) {
+  for (const links of rule.linkSets) {
     const expected =
-      text.slice(0, at + 1) + importerBlock(links) + text.slice(at + 1);
+      text.slice(0, at + 1) +
+      importerBlock(links, rule.importer) +
+      text.slice(at + 1);
     if (Buffer.from(expected, 'utf8').equals(candidate)) return 'L1';
   }
   return null;
@@ -476,6 +619,24 @@ function blobAt(git, sha, path) {
   }
 }
 
+function rawDiff(git, from, to, ...extra) {
+  return parseRaw(
+    git.raw([
+      'diff-tree',
+      '-r',
+      '-z',
+      '--raw',
+      '--no-abbrev',
+      '--no-renames',
+      '--no-color',
+      '--ignore-submodules=none',
+      ...extra,
+      from,
+      to,
+    ]),
+  );
+}
+
 function verify(config, frozenAt) {
   const git = makeGit(config.root);
   if (git(['rev-parse', '--is-inside-work-tree']) !== 'true')
@@ -484,6 +645,12 @@ function verify(config, frozenAt) {
     throw new Error('Cannot validate shallow history');
   requireTag(git, 'aven-009', config.v9, config.tagObjects['aven-009']);
   requireTag(git, 'aven-010', config.v10, config.tagObjects['aven-010']);
+  // The AVEN-011 era is closed whenever the configuration names aven-011
+  // (always, for the real repository); only synthetic fixtures of the
+  // earlier, open AVEN-011 era omit it.
+  const closed = Boolean(config.v11);
+  if (closed)
+    requireTag(git, 'aven-011', config.v11, config.tagObjects['aven-011']);
   const head = git(['rev-parse', '--verify', 'HEAD^{commit}']);
   requireAncestor(git, config.v9, config.v10, 'aven-009 is not an ancestor');
   requireAncestor(git, config.v10, head, 'aven-010 is not an ancestor');
@@ -493,10 +660,25 @@ function verify(config, frozenAt) {
     head,
     'AVEN-011 baseline is not an ancestor of HEAD',
   );
+  if (closed) {
+    requireAncestor(
+      git,
+      config.baseline,
+      config.v11,
+      'AVEN-011 baseline is not an ancestor of aven-011',
+    );
+    requireAncestor(
+      git,
+      config.v11,
+      head,
+      'aven-011 is not an ancestor of HEAD',
+    );
+  }
   const allowlists = {
     history: {
       cumulative: MAINTENANCE_DELTA,
       perCommit: perCommitTable('history', MAINTENANCE_DELTA),
+      since: config.v10,
     },
   };
   const combined = aven011Allowlist(
@@ -507,11 +689,30 @@ function verify(config, frozenAt) {
   allowlists.aven011 = {
     cumulative: combined,
     perCommit: perCommitTable('aven011', combined),
+    since: config.v10,
   };
   const basePackage = blobAt(git, config.baseline, 'package.json');
   const baseLock = blobAt(git, config.baseline, 'pnpm-lock.yaml');
   if (!basePackage || !baseLock)
     throw new Error('AVEN-011 baseline lacks package.json or pnpm-lock.yaml');
+  let v11Package = null;
+  let v11Lock = null;
+  if (closed) {
+    const delta = aven012Allowlist(
+      git,
+      config.v11,
+      config.aven012Delta ?? AVEN_012_DELTA,
+    );
+    allowlists.aven012 = {
+      cumulative: delta,
+      perCommit: perCommitTable('aven012', delta),
+      since: config.v11,
+    };
+    v11Package = blobAt(git, config.v11, 'package.json');
+    v11Lock = blobAt(git, config.v11, 'pnpm-lock.yaml');
+    if (!v11Package || !v11Lock)
+      throw new Error('aven-011 lacks package.json or pnpm-lock.yaml');
+  }
 
   const commits = git(['rev-list', '--reverse', config.v9 + '..' + head])
     .split('\n')
@@ -521,9 +722,12 @@ function verify(config, frozenAt) {
   let countFrozen = 0;
   let countNew = 0;
   let countMilestone = 0;
+  let countAven012 = 0;
   let era = config.baseline === config.v10 ? 'aven011' : 'history';
   let baselineSeen = config.baseline === config.v10;
+  let v11Seen = false;
   let trustedSeen = false;
+  let aven011TrustedSeen = false;
   const errors = [];
   for (const commit of commits) {
     const report = (codes) =>
@@ -542,40 +746,21 @@ function verify(config, frozenAt) {
     report(postFreezeViolations(commit));
     if (commit.parents.length === 1) {
       const lists = allowlists[era];
-      const changed = parseRaw(
-        git.raw([
-          'diff-tree',
-          '-r',
-          '-z',
-          '--raw',
-          '--no-abbrev',
-          '--no-renames',
-          '--no-color',
-          '--ignore-submodules=none',
-          '--no-commit-id',
-          commit.parents[0],
-          commit.sha,
-        ]),
+      const changed = rawDiff(
+        git,
+        commit.parents[0],
+        commit.sha,
+        '--no-commit-id',
       );
       report(perCommitViolations(changed, lists.perCommit));
       report(
         cumulativeViolations(
-          parseRaw(
-            git.raw([
-              'diff-tree',
-              '-r',
-              '-z',
-              '--raw',
-              '--no-abbrev',
-              '--no-renames',
-              '--no-color',
-              '--ignore-submodules=none',
-              config.v10,
-              commit.sha,
-            ]),
-          ),
+          rawDiff(git, lists.since, commit.sha),
           lists.cumulative,
         ),
+      );
+      const governanceChanged = changed.some((entry) =>
+        GOVERNANCE_PATHS.includes(entry.path),
       );
       if (era === 'aven011') {
         countMilestone += 1;
@@ -584,10 +769,25 @@ function verify(config, frozenAt) {
           report(['package_json_state']);
         const lock = blobAt(git, commit.sha, 'pnpm-lock.yaml');
         if (!lock || !lockfileState(baseLock, lock)) report(['lockfile_state']);
-        if (
-          trustedSeen &&
-          changed.some((entry) => GOVERNANCE_PATHS.includes(entry.path))
-        )
+        if (closed) {
+          // The accepted AVEN-011 trusted reference is pinned, not supplied.
+          if (aven011TrustedSeen && governanceChanged)
+            report(['governance_change_after_aven011_trusted_reference']);
+          if (commit.sha === config.aven011Trusted) aven011TrustedSeen = true;
+        } else {
+          if (trustedSeen && governanceChanged)
+            report(['governance_change_after_trusted_reference']);
+          if (commit.sha === frozenAt) trustedSeen = true;
+        }
+      } else if (era === 'aven012') {
+        countAven012 += 1;
+        const pkg = blobAt(git, commit.sha, 'package.json');
+        if (!pkg || !packageJsonState(v11Package, pkg, AVEN_012_PACKAGE_RULE))
+          report(['package_json_state']);
+        const lock = blobAt(git, commit.sha, 'pnpm-lock.yaml');
+        if (!lock || !lockfileState(v11Lock, lock, AVEN_012_LOCK_RULE))
+          report(['lockfile_state']);
+        if (trustedSeen && governanceChanged)
           report(['governance_change_after_trusted_reference']);
         if (commit.sha === frozenAt) trustedSeen = true;
       }
@@ -596,18 +796,50 @@ function verify(config, frozenAt) {
       era = 'aven011';
       baselineSeen = true;
     }
+    if (closed && commit.sha === config.v11) {
+      if (era !== 'aven011')
+        errors.push('aven-011 is not an AVEN-011 era commit of HEAD');
+      era = 'aven012';
+      v11Seen = true;
+    }
   }
   if (countFrozen !== config.frozenCount || previous !== head)
     errors.push('History is not a complete linear extension of AVEN-010');
   if (!baselineSeen)
     errors.push('AVEN-011 baseline is not a post-freeze commit of HEAD');
+  if (closed) {
+    if (!v11Seen) errors.push('aven-011 is not a post-freeze commit of HEAD');
+    if (countMilestone !== config.aven011Count)
+      errors.push(
+        'AVEN-011 must have exactly ' +
+          config.aven011Count +
+          ' commits after its baseline; found ' +
+          countMilestone,
+      );
+    if (!aven011TrustedSeen)
+      errors.push(
+        'AVEN-011 trusted reference ' +
+          config.aven011Trusted +
+          ' is not an AVEN-011 milestone commit of this history',
+      );
+  }
   if (frozenAt && !trustedSeen)
     throw new Error(
       'Trusted reference ' +
         frozenAt +
-        ' is not an AVEN-011 milestone commit of this history',
+        ' is not an ' +
+        (closed ? 'AVEN-012' : 'AVEN-011') +
+        ' milestone commit of this history',
     );
-  return { head, countFrozen, countNew, countMilestone, errors };
+  return {
+    head,
+    closed,
+    countFrozen,
+    countNew,
+    countMilestone,
+    countAven012,
+    errors,
+  };
 }
 
 function blobId(path) {
@@ -618,13 +850,23 @@ function blobId(path) {
     .digest('hex');
 }
 
-/** Runs one invocation; returns the process exit code (0 pass, 1 fail). */
+/**
+ * Runs one invocation; returns the process exit code (0 pass, 1 fail), or,
+ * for --self-test, a promise of it.
+ */
 export function main(argv, config = REAL_CONFIG) {
   try {
     if (argv.length === 1 && argv[0] === '--self-test') {
       if (config !== REAL_CONFIG) throw new Error(USAGE);
-      selfTest();
-      return 0;
+      return selfTest().then(
+        () => 0,
+        (error) => {
+          console.error(
+            'FAIL: ' + (error instanceof Error ? error.message : String(error)),
+          );
+          return 1;
+        },
+      );
     }
     let frozenAt = null;
     if (argv.length === 2 && argv[0] === '--governance-frozen-at') {
@@ -644,16 +886,41 @@ export function main(argv, config = REAL_CONFIG) {
         '; post-freeze=' +
         result.countNew,
     );
-    console.log(
-      'AVEN-011 governance (' +
-        GOVERNANCE_VERSION +
-        '): baseline ' +
-        config.baseline +
-        '; milestone commits=' +
-        result.countMilestone +
-        '; governance frozen at ' +
-        (frozenAt ?? 'not requested'),
-    );
+    if (result.closed) {
+      console.log(
+        'AVEN-011 governance (' +
+          AVEN_011_GOVERNANCE_VERSION +
+          ', closed at aven-011 ' +
+          config.v11 +
+          '): baseline ' +
+          config.baseline +
+          '; milestone commits=' +
+          result.countMilestone +
+          '; governance frozen at ' +
+          config.aven011Trusted +
+          ' (pinned)',
+      );
+      console.log(
+        'AVEN-012 governance (' +
+          GOVERNANCE_VERSION +
+          '): baseline aven-011 ' +
+          config.v11 +
+          '; milestone commits=' +
+          result.countAven012 +
+          '; governance frozen at ' +
+          (frozenAt ?? 'not requested'),
+      );
+    } else
+      console.log(
+        'AVEN-011 governance (' +
+          AVEN_011_GOVERNANCE_VERSION +
+          '): baseline ' +
+          config.baseline +
+          '; milestone commits=' +
+          result.countMilestone +
+          '; governance frozen at ' +
+          (frozenAt ?? 'not requested'),
+      );
     console.log(
       'Evaluator blobs: check-post-aven010.mjs ' +
         blobId(SELF) +
@@ -663,7 +930,9 @@ export function main(argv, config = REAL_CONFIG) {
     for (const error of result.errors) console.error('FAIL: ' + error);
     if (result.errors.length) return 1;
     console.log(
-      'PASS: preserved frozen lineage, owner-first commits and AVEN-011 file governance',
+      result.closed
+        ? 'PASS: preserved frozen lineage, owner-first commits, the closed AVEN-011 history and AVEN-012 file governance'
+        : 'PASS: preserved frozen lineage, owner-first commits and AVEN-011 file governance',
     );
     return 0;
   } catch (error) {
@@ -745,7 +1014,15 @@ importers:
         version: 4.6.5
 
 `;
-const SYN_LOCK_TAIL = `  packages/baseline:
+const SYN_LOCK_BASELINE = `  packages/baseline:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+`;
+/** A runtime importer gives the AVEN-012 block its anchor. */
+const SYN_LOCK_REST = `  packages/runtime:
     dependencies:
       zod:
         specifier: 4.6.5
@@ -756,6 +1033,7 @@ packages:
   zod@4.6.5:
     resolution: {integrity: sha512-synthetic}
 `;
+const SYN_LOCK_TAIL = SYN_LOCK_BASELINE + SYN_LOCK_REST;
 const SYN_BLOCK_START = `  packages/action-proposals:
     dependencies:
       '@aven/contracts':
@@ -786,6 +1064,34 @@ const SYN_BLOCK_1 = SYN_BLOCK_START + SYN_BLOCK_END;
 const SYN_BLOCK_2 = SYN_BLOCK_START + SYN_BLOCK_LINKS + SYN_BLOCK_END;
 const SYN_LOCK_1 = SYN_LOCK_HEAD + SYN_BLOCK_1 + SYN_LOCK_TAIL;
 const SYN_LOCK_2 = SYN_LOCK_HEAD + SYN_BLOCK_2 + SYN_LOCK_TAIL;
+// AVEN-012: the aven-011 state is SYN_LOCK_2; one root-policy block follows.
+const SYN_012_BLOCK_START = `  packages/root-policy:
+    dependencies:
+      '@aven/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+`;
+const SYN_012_BLOCK_1 = SYN_012_BLOCK_START + SYN_BLOCK_END;
+const SYN_012_BLOCK_2 = SYN_012_BLOCK_START + SYN_BLOCK_LINKS + SYN_BLOCK_END;
+const lock012With = (block) =>
+  SYN_LOCK_HEAD + SYN_BLOCK_2 + SYN_LOCK_BASELINE + block + SYN_LOCK_REST;
+const SYN_LOCK_012_1 = lock012With(SYN_012_BLOCK_1);
+const SYN_LOCK_012_2 = lock012With(SYN_012_BLOCK_2);
+/** The aven-011 package.json plus the one AVEN-012 insertion, literally. */
+const SYN_PACKAGE_012_INSERTED = {
+  ...SYN_PACKAGE_FINAL,
+  scripts: {
+    ...SYN_PACKAGE_FINAL.scripts,
+    typecheck:
+      'tsc --project packages/contracts/tsconfig.json --noEmit && tsc --project packages/corrections/tsconfig.json --noEmit && tsc --project packages/action-proposals/tsconfig.json --noEmit && tsc --project packages/root-policy/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit',
+    check:
+      'prettier --check . && tsc --project packages/corrections/tsconfig.json --noEmit && tsc --project packages/action-proposals/tsconfig.json --noEmit && tsc --project packages/root-policy/tsconfig.json --noEmit && tsc --project apps/api/tsconfig.json --noEmit && vitest run',
+  },
+};
+const SYN_PACKAGE_012_FINAL = {
+  ...SYN_PACKAGE_012_INSERTED,
+  description: AVEN_012_DESCRIPTION,
+};
 
 const put = (path, content, mode = '100644') => ({ path, content, mode });
 const drop = (path) => ({ path, drop: true });
@@ -844,6 +1150,50 @@ const SYN_PATCHES = Object.freeze({
     put('AGENTS.md', '# Synthetic agents v6\n'),
     put('package.json', json(SYN_PACKAGE_FINAL)),
     put(pkg('README.md'), '# package v6\n'),
+  ],
+  // The real seventh AVEN-011 commit records finalization in the report.
+  p7: [put('docs/AVEN_011_REPORT.md', '# Synthetic AVEN-011 report v7\n')],
+});
+
+const pkg012 = (path) => 'packages/root-policy/' + path;
+const GATE = 'tooling/attribution/check-post-aven010.mjs';
+const POLICY = 'docs/POST_AVEN010_COMMIT_ATTRIBUTION.md';
+const WORKFLOW = '.github/workflows/owner-first-attribution.yml';
+/** The accepted four-patch AVEN-012 file-change pattern, synthetic content. */
+const SYN_012_PATCHES = Object.freeze({
+  q1: [
+    put(GATE, '// gate v3\n'),
+    put(POLICY, '# Policy v3\n'),
+    put(WORKFLOW, 'name: ci v3\n'),
+    put('AGENTS.md', '# Synthetic agents v12\n'),
+  ],
+  q2: [
+    ...AVEN_012_PACKAGE_FILES.slice(0, 23).map((path) =>
+      put(path, synthetic(path)),
+    ),
+    put('package.json', json(SYN_PACKAGE_012_INSERTED)),
+    put('pnpm-lock.yaml', SYN_LOCK_012_1),
+  ],
+  q3: [
+    ...AVEN_012_PACKAGE_FILES.slice(23, 31).map((path) =>
+      put(path, synthetic(path)),
+    ),
+    put(pkg012('package.json'), '{ "v": 3 }\n'),
+    put(pkg012('src/index.ts'), '// root entry v3\n'),
+    put(pkg012('test/boundaries.test.ts'), '// boundaries v3\n'),
+    put(pkg012('README.md'), '# root-policy v3\n'),
+    put('pnpm-lock.yaml', SYN_LOCK_012_2),
+  ],
+  q4: [
+    ...AVEN_012_PACKAGE_FILES.slice(31).map((path) =>
+      put(path, synthetic(path)),
+    ),
+    put('docs/AVEN_012_REPORT.md', '# Synthetic AVEN-012 report\n'),
+    put('README.md', '# Synthetic readme v12\n'),
+    put('docs/ROADMAP.md', '# Synthetic roadmap v12\n'),
+    put('AGENTS.md', '# Synthetic agents v12, reconciled\n'),
+    put('package.json', json(SYN_PACKAGE_012_FINAL)),
+    put(pkg012('README.md'), '# root-policy v4\n'),
   ],
 });
 
@@ -912,6 +1262,20 @@ function baseHistory(patches) {
     argv: () => [],
     after: () => {},
   };
+}
+
+/**
+ * The closed AVEN-011 era (seven commits, trusted reference p1, annotated
+ * aven-011 at p7), followed by the given AVEN-012 patches.
+ */
+function closedHistory(patches) {
+  const history = baseHistory(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7']);
+  history.tags.push({ name: 'aven-011', at: 'p7' });
+  history.v11 = 'p7';
+  history.aven011Trusted = 'p1';
+  for (const id of patches)
+    history.commits.push(milestone(id, structuredClone(SYN_012_PATCHES[id])));
+  return history;
 }
 
 function fixtureEnv(home) {
@@ -999,10 +1363,13 @@ function buildFixture(history) {
       .map(([mark, sha]) => [Number(mark.slice(1)), sha]),
   );
   const sha = (id) => shaByMark.get(marks.get(id));
-  const tagObjects = {
-    'aven-009': fixtureGit(repo, env, ['rev-parse', 'refs/tags/aven-009']),
-    'aven-010': fixtureGit(repo, env, ['rev-parse', 'refs/tags/aven-010']),
-  };
+  // Pinned before any fixture-only tag tampering in `after`.
+  const tagObjects = Object.fromEntries(
+    history.tags.map((tag) => [
+      tag.name,
+      fixtureGit(repo, env, ['rev-parse', 'refs/tags/' + tag.name]),
+    ]),
+  );
   const run = (args) => fixtureGit(repo, env, args);
   history.after({ run, sha, env });
   return { dir, repo, home, sha, tagObjects };
@@ -1012,8 +1379,33 @@ const CHILD = `import { readFileSync } from 'node:fs';
 import { main } from ${JSON.stringify(pathToFileURL(SELF).href)};
 process.exitCode = main(JSON.parse(process.argv[2]), JSON.parse(readFileSync(process.argv[1], 'utf8')));`;
 
-/** Runs the gate's CLI entry point in a child process against a fixture. */
-function runFixture(history) {
+/** Removes one fixture directory, refusing anything but a fixture. */
+function removeFixture(dir) {
+  const target = resolve(dir);
+  if (
+    dirname(target) !== resolve(tmpdir()) ||
+    !basename(target).startsWith('aven011-gate-')
+  )
+    throw new Error('Unsafe synthetic fixture cleanup: ' + target);
+  // Git may write read-only pack files (notably on Windows).
+  const writable = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) writable(child);
+      else if (entry.isFile()) chmodSync(child, 0o666);
+    }
+  };
+  writable(target);
+  rmSync(target, { recursive: true, force: true, maxRetries: 3 });
+}
+
+/**
+ * Runs the gate's CLI entry point in a child process against a fixture.
+ * The fixture is built synchronously; the child runs asynchronously, so a
+ * bounded number of fixtures can be judged at once. Each child sees only its
+ * own fixture repository, configuration file and isolated Git home.
+ */
+async function runFixture(history) {
   const fixture = buildFixture(history);
   try {
     const config = {
@@ -1025,44 +1417,62 @@ function runFixture(history) {
       frozenCount: 16,
       synthetic: true,
       ...(history.delta ? { aven011Delta: history.delta } : {}),
+      ...(history.v11
+        ? {
+            v11: fixture.sha(history.v11),
+            aven011Trusted: fixture.sha(history.aven011Trusted),
+            aven011Count: 7,
+          }
+        : {}),
+      ...(history.delta012 ? { aven012Delta: history.delta012 } : {}),
     };
     const configFile = join(fixture.dir, 'config.json');
     writeFileSync(configFile, JSON.stringify(config));
-    const result = spawnSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        CHILD,
-        configFile,
-        JSON.stringify(history.argv(fixture.sha)),
-      ],
-      {
-        env: fixtureEnv(fixture.home),
-        encoding: 'utf8',
-        timeout: 300000,
-        maxBuffer: 64 * 1024 * 1024,
-      },
-    );
-    return { status: result.status, output: result.stdout + result.stderr };
+    return await new Promise((done) => {
+      const child = spawn(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          CHILD,
+          configFile,
+          JSON.stringify(history.argv(fixture.sha)),
+        ],
+        { env: fixtureEnv(fixture.home), stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let output = '';
+      child.stdout.setEncoding('utf8').on('data', (text) => (output += text));
+      child.stderr.setEncoding('utf8').on('data', (text) => (output += text));
+      const timer = setTimeout(() => child.kill(), 300000);
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        done({ status: null, output: output + String(error) });
+      });
+      child.on('close', (status) => {
+        clearTimeout(timer);
+        done({ status, output });
+      });
+    });
   } finally {
-    const target = resolve(fixture.dir);
-    if (
-      dirname(target) !== resolve(tmpdir()) ||
-      !basename(target).startsWith('aven011-gate-')
-    )
-      throw new Error('Unsafe synthetic fixture cleanup: ' + target);
-    // Git may write read-only pack files (notably on Windows).
-    const writable = (dir) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) writable(path);
-        else if (entry.isFile()) chmodSync(path, 0o666);
-      }
-    };
-    writable(target);
-    rmSync(target, { recursive: true, force: true, maxRetries: 3 });
+    removeFixture(fixture.dir);
   }
+}
+
+/** Runs async jobs with at most `limit` in flight; results keep job order. */
+async function pooled(jobs, limit) {
+  const results = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const index = next;
+      next += 1;
+      results[index] = await jobs[index]();
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, jobs.length) }, worker),
+  );
+  return results;
 }
 
 const find = (history, id) => history.commits.find((c) => c.id === id);
@@ -1653,6 +2063,448 @@ const VIOLATIONS = Object.freeze([
   ],
 ]);
 
+// ---------------------------------------------------------------------------
+// AVEN-012 era (`aven-012-governance-v1`). Each history closes the AVEN-011
+// era with seven commits and an annotated aven-011 tag; that era is still
+// judged by the unchanged AVEN-011 rules, now with its trusted reference
+// pinned. The AVEN-012 rules are judged against the aven-011 tree.
+
+const CONTROLS_012 = Object.freeze({
+  'AVEN-011 closed at aven-011, no AVEN-012 commit': () => closedHistory([]),
+  'AVEN-012 Patch 1 with unchanged package.json and lockfile': () =>
+    closedHistory(['q1']),
+  'AVEN-012 Patches 1-2 with the permitted importer addition': () =>
+    closedHistory(['q1', 'q2']),
+  'complete four-patch AVEN-012 pattern': () =>
+    closedHistory(['q1', 'q2', 'q3', 'q4']),
+  'four AVEN-012 patches, governance frozen at AVEN-012 Patch 1': () => ({
+    ...closedHistory(['q1', 'q2', 'q3', 'q4']),
+    argv: (sha) => ['--governance-frozen-at', sha('q1')],
+  }),
+  'four AVEN-012 patches plus a later governance-only commit (no freeze)':
+    () => {
+      const history = closedHistory(['q1', 'q2', 'q3', 'q4']);
+      insertAfter(
+        history,
+        'q3',
+        milestone('g2', [put(POLICY, '# Policy v4\n')]),
+      );
+      return history;
+    },
+});
+const K0 = CONTROLS_012['AVEN-011 closed at aven-011, no AVEN-012 commit'];
+const K1 =
+  CONTROLS_012['AVEN-012 Patch 1 with unchanged package.json and lockfile'];
+const K2 =
+  CONTROLS_012['AVEN-012 Patches 1-2 with the permitted importer addition'];
+const K4 = CONTROLS_012['complete four-patch AVEN-012 pattern'];
+const K4G =
+  CONTROLS_012[
+    'four AVEN-012 patches plus a later governance-only commit (no freeze)'
+  ];
+const package012 = (scripts) =>
+  json({
+    ...SYN_PACKAGE_012_INSERTED,
+    scripts: { ...SYN_PACKAGE_012_INSERTED.scripts, ...scripts },
+  });
+
+/** [name, control, defect, expected output fragment]. */
+const VIOLATIONS_012 = Object.freeze([
+  // AVEN-011 and earlier files are frozen in the AVEN-012 era.
+  [
+    'AVEN-012: AVEN-011 package source',
+    K2,
+    addTo('q2', put(pkg('src/index.ts'), 'x\n')),
+    'unauthorized_path packages/action-proposals/src/index.ts',
+  ],
+  [
+    'AVEN-012: AVEN-011 package test',
+    K2,
+    addTo('q2', put(pkg('test/boundaries.test.ts'), 'x\n')),
+    'unauthorized_path packages/action-proposals/test/boundaries.test.ts',
+  ],
+  [
+    'AVEN-012: AVEN-011 report',
+    K2,
+    addTo('q2', put('docs/AVEN_011_REPORT.md', 'x\n')),
+    'unauthorized_path docs/AVEN_011_REPORT.md',
+  ],
+  [
+    'AVEN-012: AVEN-011 file deleted',
+    K2,
+    addTo('q2', drop(pkg('src/inspect.ts'))),
+    'unauthorized_path packages/action-proposals/src/inspect.ts',
+  ],
+  [
+    'AVEN-012: AVEN-011 file modified then restored',
+    K2,
+    (h) =>
+      insertAfter(
+        h,
+        'q2',
+        milestone('t1', [put(pkg('src/index.ts'), 'tampered\n')]),
+        milestone('t2', [
+          put(pkg('src/index.ts'), synthetic(pkg('src/index.ts'))),
+        ]),
+      ),
+    'unauthorized_path packages/action-proposals/src/index.ts',
+  ],
+  [
+    'AVEN-012: frozen AVEN-010 source',
+    K2,
+    addTo('q2', put('packages/ledger/src/ledger.ts', 'x\n')),
+    'unauthorized_path packages/ledger/src/ledger.ts',
+  ],
+  [
+    'AVEN-012: frozen evaluator',
+    K2,
+    addTo('q2', put('tooling/attribution/attribution.ts', 'x\n')),
+    'unauthorized_path tooling/attribution/attribution.ts',
+  ],
+  [
+    'AVEN-012: Root placeholder directory',
+    K2,
+    addTo('q2', put('packages/root/index.ts', 'x\n')),
+    'unauthorized_path packages/root/index.ts',
+  ],
+  [
+    'AVEN-012: unlisted package file',
+    K2,
+    addTo('q2', put(pkg012('src/extra.ts'), 'x\n')),
+    'unauthorized_path packages/root-policy/src/extra.ts',
+  ],
+  [
+    'AVEN-012: unlisted nested package file',
+    K4,
+    addTo('q3', put(pkg012('src/ledger/extra.ts'), 'x\n')),
+    'unauthorized_path packages/root-policy/src/ledger/extra.ts',
+  ],
+  [
+    'AVEN-012: package file deleted',
+    K4,
+    addTo('q3', drop(pkg012('src/evaluate.ts'))),
+    'forbidden_status D packages/root-policy/src/evaluate.ts',
+  ],
+  [
+    'AVEN-012: executable package file',
+    K2,
+    (h) => {
+      find(h, 'q2').changes.find(
+        (c) => c.path === pkg012('src/index.ts'),
+      ).mode = '100755';
+    },
+    'forbidden_mode 000000->100755 packages/root-policy/src/index.ts',
+  ],
+  [
+    'AVEN-012: symlink',
+    K2,
+    (h) => {
+      find(h, 'q2').changes.find(
+        (c) => c.path === pkg012('src/config.ts'),
+      ).mode = '120000';
+    },
+    'forbidden_mode 000000->120000 packages/root-policy/src/config.ts',
+  ],
+  [
+    'AVEN-012: type change to symlink',
+    K4,
+    addTo('q3', put(pkg012('src/canonical.ts'), 'index.ts', '120000')),
+    'forbidden_status T packages/root-policy/src/canonical.ts',
+  ],
+  [
+    'AVEN-012: governance file deleted',
+    K1,
+    (h) => insertAfter(h, 'q1', milestone('gd', [drop(WORKFLOW)])),
+    'forbidden_status D .github/workflows/owner-first-attribution.yml',
+  ],
+  [
+    'AVEN-012 allowlist data naming an AVEN-011 file',
+    K2,
+    (h) => {
+      h.delta012 = { ...AVEN_012_DELTA, [pkg('src/index.ts')]: 'M' };
+    },
+    'allowlist_names_frozen_path: M packages/action-proposals/src/index.ts',
+  ],
+  [
+    'AVEN-012 allowlist data adding over the AVEN-011 report',
+    K2,
+    (h) => {
+      h.delta012 = { ...AVEN_012_DELTA, 'docs/AVEN_011_REPORT.md': 'A' };
+    },
+    'allowlist_names_frozen_path: A docs/AVEN_011_REPORT.md',
+  ],
+  // Governance.
+  [
+    'AVEN-012: governance change not isolated',
+    K2,
+    addTo('q1', put(pkg012('package.json'), '{}\n')),
+    'governance_change_not_isolated',
+  ],
+  [
+    'AVEN-012: governance change after the trusted reference',
+    K4G,
+    (h) => {
+      h.argv = (sha) => ['--governance-frozen-at', sha('q1')];
+    },
+    'governance_change_after_trusted_reference',
+  ],
+  [
+    'AVEN-011 trusted reference offered for the AVEN-012 era',
+    K1,
+    (h) => {
+      h.argv = (sha) => ['--governance-frozen-at', sha('p1')];
+    },
+    'is not an AVEN-012 milestone commit',
+  ],
+  [
+    'AVEN-012 trusted reference at aven-011 itself',
+    K4,
+    (h) => {
+      h.argv = (sha) => ['--governance-frozen-at', sha('p7')];
+    },
+    'is not an AVEN-012 milestone commit',
+  ],
+  // The closed AVEN-011 era.
+  [
+    'AVEN-011 era governance change after its pinned trusted reference',
+    K0,
+    (h) => {
+      find(h, 'p7').changes = [put(POLICY, '# Policy v2, amended\n')];
+    },
+    'governance_change_after_aven011_trusted_reference',
+  ],
+  [
+    'AVEN-011 pinned trusted reference outside the AVEN-011 era',
+    K0,
+    (h) => {
+      h.aven011Trusted = 'h6';
+    },
+    'is not an AVEN-011 milestone commit',
+  ],
+  [
+    'AVEN-011 era with an eighth commit',
+    K1,
+    (h) =>
+      insertAfter(
+        h,
+        'p6',
+        milestone('p6b', [put('README.md', '# Synthetic readme v6b\n')]),
+      ),
+    'AVEN-011 must have exactly 7 commits after its baseline; found 8',
+  ],
+  [
+    'AVEN-011 era with a frozen-file change',
+    K1,
+    addTo('p5', put('packages/ledger/src/ledger.ts', 'x\n')),
+    'unauthorized_path packages/ledger/src/ledger.ts',
+  ],
+  [
+    'aven-011 moved',
+    K1,
+    (h) => {
+      h.after = ({ run, sha }) =>
+        run(['tag', '-f', '-a', '-m', 'moved', 'aven-011', sha('p6')]);
+    },
+    'aven-011 moved from its frozen commit',
+  ],
+  [
+    'aven-011 tag object replaced',
+    K1,
+    (h) => {
+      h.after = ({ run, sha }) =>
+        run(['tag', '-f', '-a', '-m', 'replaced', 'aven-011', sha('p7')]);
+    },
+    'aven-011 annotated tag object was replaced',
+  ],
+  [
+    'aven-011 made lightweight',
+    K1,
+    (h) => {
+      h.after = ({ run, sha }) => run(['tag', '-f', 'aven-011', sha('p7')]);
+    },
+    'aven-011 is not annotated',
+  ],
+  [
+    'aven-011 deleted',
+    K1,
+    (h) => {
+      h.after = ({ run }) => run(['tag', '-d', 'aven-011']);
+    },
+    'aven-011 tag is missing',
+  ],
+  [
+    'aven-011 not an ancestor of HEAD',
+    K1,
+    (h) => {
+      find(h, 'q1').from = 'p6';
+    },
+    'aven-011 is not an ancestor of HEAD',
+  ],
+  // package.json.
+  [
+    'AVEN-012: package.json test exclusions',
+    K2,
+    setIn('q2', 'package.json', package012({ test: 'vitest run' })),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json one script only',
+    K2,
+    setIn(
+      'q2',
+      'package.json',
+      package012({ check: SYN_PACKAGE_FINAL.scripts.check }),
+    ),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json drops the AVEN-011 typecheck',
+    K2,
+    setIn(
+      'q2',
+      'package.json',
+      package012({
+        typecheck: SYN_PACKAGE_012_INSERTED.scripts.typecheck.replace(
+          ' && tsc --project packages/action-proposals/tsconfig.json --noEmit',
+          '',
+        ),
+      }),
+    ),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json new dependency',
+    K2,
+    setIn(
+      'q2',
+      'package.json',
+      json({ ...SYN_PACKAGE_012_INSERTED, dependencies: { leftpad: '1.0.0' } }),
+    ),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json unapproved description',
+    K4,
+    setIn(
+      'q4',
+      'package.json',
+      json({ ...SYN_PACKAGE_012_INSERTED, description: 'Something else' }),
+    ),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json reverts to the pre-AVEN-011 description',
+    K4,
+    setIn(
+      'q4',
+      'package.json',
+      json({
+        ...SYN_PACKAGE_012_INSERTED,
+        description: SYN_PACKAGE_V9.description,
+      }),
+    ),
+    'package_json_state',
+  ],
+  [
+    'AVEN-012: package.json tampered then restored',
+    K2,
+    (h) =>
+      insertAfter(
+        h,
+        'q2',
+        milestone('t1', [
+          put('package.json', package012({ test: 'vitest run' })),
+        ]),
+        milestone('t2', [put('package.json', json(SYN_PACKAGE_012_INSERTED))]),
+      ),
+    'package_json_state',
+  ],
+  // pnpm-lock.yaml.
+  [
+    'AVEN-012: lockfile block in wrong position',
+    K2,
+    setIn(
+      'q2',
+      'pnpm-lock.yaml',
+      SYN_LOCK_HEAD +
+        SYN_BLOCK_2 +
+        SYN_012_BLOCK_1 +
+        SYN_LOCK_BASELINE +
+        SYN_LOCK_REST,
+    ),
+    'lockfile_state',
+  ],
+  [
+    'AVEN-012: lockfile links the AVEN-011 package',
+    K2,
+    setIn(
+      'q2',
+      'pnpm-lock.yaml',
+      lock012With(
+        SYN_012_BLOCK_START +
+          "      '@aven/action-proposals':\n        specifier: workspace:*\n        version: link:../action-proposals\n" +
+          SYN_BLOCK_END,
+      ),
+    ),
+    'lockfile_state',
+  ],
+  [
+    'AVEN-012: lockfile drops the AVEN-011 importer',
+    K2,
+    setIn(
+      'q2',
+      'pnpm-lock.yaml',
+      SYN_LOCK_HEAD + SYN_LOCK_BASELINE + SYN_012_BLOCK_1 + SYN_LOCK_REST,
+    ),
+    'lockfile_state',
+  ],
+  [
+    'AVEN-012: lockfile tampered then restored',
+    K2,
+    (h) =>
+      insertAfter(
+        h,
+        'q2',
+        milestone('t1', [
+          put('pnpm-lock.yaml', SYN_LOCK_012_1 + '# tampered\n'),
+        ]),
+        milestone('t2', [put('pnpm-lock.yaml', SYN_LOCK_012_1)]),
+      ),
+    'lockfile_state',
+  ],
+  // Identity, trailers and linearity.
+  [
+    'AVEN-012: author is not the owner',
+    K1,
+    (h) => {
+      find(h, 'q1').author = SYN_CLAUDE;
+    },
+    'owner_not_primary_author',
+  ],
+  [
+    'AVEN-012: missing Claude trailer',
+    K1,
+    (h) => {
+      find(h, 'q1').message = 'synthetic q1\n\nNo trailer.\n';
+    },
+    'claude_trailer_missing_duplicate_or_unparsed',
+  ],
+  [
+    'AVEN-012: merge commit',
+    K2,
+    (h) => {
+      insertAfter(h, 'q1', {
+        ...milestone('side012', [put('README.md', '# side\n')]),
+        branch: 'side012',
+        from: 'q1',
+      });
+      find(h, 'q2').from = 'q1';
+      find(h, 'q2').merge = ['side012'];
+    },
+    'nonlinear_commit',
+  ],
+]);
+
 function cliArgumentChecks() {
   for (const args of [
     ['--bogus'],
@@ -1669,21 +2521,43 @@ function cliArgumentChecks() {
   }
 }
 
-function syntheticCampaign() {
+/**
+ * Runs every control and then every single-defect violation whose control
+ * passed. A violation must exit 1 and print its expected fragment.
+ */
+async function campaign(controls, violations, limit) {
   const failures = [];
+  const controlEntries = Object.entries(controls);
+  const controlResults = await pooled(
+    controlEntries.map(
+      ([, control]) =>
+        () =>
+          runFixture(control()),
+    ),
+    limit,
+  );
   const passed = new Map();
-  for (const [name, control] of Object.entries(CONTROLS)) {
-    const result = runFixture(control());
+  controlEntries.forEach(([name, control], index) => {
+    const result = controlResults[index];
     passed.set(control, result.status === 0);
     if (result.status !== 0)
       failures.push('control "' + name + '" failed:\n' + result.output);
-  }
-  for (const [name, control, defect, expected] of VIOLATIONS) {
-    if (!passed.get(control)) {
-      failures.push('violation "' + name + '" has no passing control');
-      continue;
-    }
-    const result = runFixture(mutate(control, defect));
+  });
+  const runnable = violations.filter(([name, control]) => {
+    if (passed.get(control)) return true;
+    failures.push('violation "' + name + '" has no passing control');
+    return false;
+  });
+  const results = await pooled(
+    runnable.map(
+      ([, control, defect]) =>
+        () =>
+          runFixture(mutate(control, defect)),
+    ),
+    limit,
+  );
+  runnable.forEach(([name, , , expected], index) => {
+    const result = results[index];
     if (result.status !== 1 || !result.output.includes(expected))
       failures.push(
         'violation "' +
@@ -1695,17 +2569,30 @@ function syntheticCampaign() {
           ':\n' +
           result.output,
       );
-  }
+  });
+  return failures;
+}
+
+async function syntheticCampaign() {
+  const limit = Math.max(2, Math.min(8, availableParallelism()));
+  const failures = [
+    ...(await campaign(CONTROLS, VIOLATIONS, limit)),
+    ...(await campaign(CONTROLS_012, VIOLATIONS_012, limit)),
+  ];
   if (failures.length) throw new Error(failures.join('\n\n'));
   return (
     Object.keys(CONTROLS).length +
     ' passing controls and ' +
     VIOLATIONS.length +
-    ' single-defect violations'
+    ' single-defect violations of the open AVEN-011 era; ' +
+    Object.keys(CONTROLS_012).length +
+    ' passing controls and ' +
+    VIOLATIONS_012.length +
+    ' single-defect violations of the closed AVEN-011 and the AVEN-012 era'
   );
 }
 
-function selfTest() {
+async function selfTest() {
   const good = {
     parents: [V10],
     authorName: 'Varun Karthik',
@@ -1794,9 +2681,60 @@ function selfTest() {
     ['cumulative_unauthorized README.md'],
   );
   console.log('PASS: four direct cumulative-state cases');
+  // AVEN-012 states, judged directly against the synthetic aven-011 state.
+  const bytes = (text) => Buffer.from(text, 'utf8');
+  const v11Package = bytes(json(SYN_PACKAGE_FINAL));
+  for (const [candidate, state] of [
+    [SYN_PACKAGE_FINAL, 'P0'],
+    [SYN_PACKAGE_012_INSERTED, 'P1'],
+    [SYN_PACKAGE_012_FINAL, 'P1'],
+    [{ ...SYN_PACKAGE_FINAL, description: AVEN_012_DESCRIPTION }, 'P1'],
+    [SYN_PACKAGE_INSERTED, null],
+  ])
+    assert.equal(
+      packageJsonState(
+        v11Package,
+        bytes(json(candidate)),
+        AVEN_012_PACKAGE_RULE,
+      ),
+      state,
+    );
+  for (const [candidate, state] of [
+    [SYN_LOCK_2, 'L0'],
+    [SYN_LOCK_012_1, 'L1'],
+    [SYN_LOCK_012_2, 'L1'],
+    [SYN_LOCK_1, null],
+  ])
+    assert.equal(
+      lockfileState(bytes(SYN_LOCK_2), bytes(candidate), AVEN_012_LOCK_RULE),
+      state,
+    );
+  // The AVEN-011 rule cannot admit the AVEN-012 block, nor the reverse.
+  assert.equal(lockfileState(bytes(SYN_LOCK_2), bytes(SYN_LOCK_012_1)), null);
+  assert.equal(
+    lockfileState(bytes(SYN_LOCK_BASE), bytes(SYN_LOCK_1), AVEN_012_LOCK_RULE),
+    null,
+  );
+  assert.deepEqual(
+    cumulativeViolations([entry('M', gate)], AVEN_012_DELTA),
+    [],
+  );
+  assert.deepEqual(cumulativeViolations([entry('A', gate)], AVEN_012_DELTA), [
+    'cumulative_status A ' + gate,
+  ]);
+  assert.deepEqual(
+    cumulativeViolations(
+      [entry('M', 'packages/action-proposals/src/index.ts')],
+      AVEN_012_DELTA,
+    ),
+    ['cumulative_unauthorized packages/action-proposals/src/index.ts'],
+  );
+  console.log('PASS: fourteen direct AVEN-012 state cases');
   cliArgumentChecks();
   console.log('PASS: CLI rejects malformed arguments with exit status 1');
-  console.log('PASS: synthetic-history campaign, ' + syntheticCampaign());
+  console.log(
+    'PASS: synthetic-history campaign, ' + (await syntheticCampaign()),
+  );
 }
 
 function invokedDirectly() {
@@ -1810,4 +2748,7 @@ function invokedDirectly() {
   }
 }
 
-if (invokedDirectly()) process.exitCode = main(process.argv.slice(2));
+if (invokedDirectly())
+  Promise.resolve(main(process.argv.slice(2))).then((code) => {
+    process.exitCode = code;
+  });
