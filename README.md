@@ -5,15 +5,17 @@ become more useful to one owner through evidence-backed learning. The immediate
 question is whether governed persistent learning can outperform a strong naive
 personalization baseline while authority remains externally controlled.
 
-**Current scope: AVEN-011 Action Proposal Boundary, on the isolated branch
-`aven-011/action-proposals` over the AVEN-011 baseline `c8b83ec` (frozen
-AVEN-010 at tag `aven-010`, `76535d8`). Patches 1-5 are independently accepted
-and committed, with GitHub CI passing on Patches 2-5; Patch 6 (report and status
-reconciliation) is a candidate pending independent review. AVEN-011 is not
-accepted as a milestone, not merged, not frozen and not tagged; `main` remains
-at `c8b83ec`.** The [contracts package](packages/contracts/README.md) defines
-schemas and types; the [storage package](packages/storage/README.md) provides
-local SQLite schema, integrity constraints, and migrations. The
+**Current scope: AVEN-012 Root Policy Gateway, on the isolated branch
+`aven-012/root-policy-gateway` over the frozen AVEN-011 milestone (annotated tag
+`aven-011`, `44ba416`; `main` is at `44ba416`). Of its four patches, the
+successor governance (`f3ffdf7`) and the pure Root policy engine (`fd9b873`) are
+independently approved and committed by the owner; approval checks with audited
+decision recording and the adversarial campaign with this status reconciliation
+are corrected candidates after independent review findings, pending a new
+review. Nothing is merged or tagged.** The
+[contracts package](packages/contracts/README.md) defines schemas and types; the
+[storage package](packages/storage/README.md) provides local SQLite schema,
+integrity constraints, and migrations. The
 [Ledger package](packages/ledger/README.md) adds atomic historical recording,
 owner-bound reads, observational replay, and integrity inspection. The
 [API app](apps/api/README.md) adds a loopback HTTP boundary for owner-scoped
@@ -67,15 +69,28 @@ read-only historical reader that classifies each recorded proposal event
 (protocol, digest agreement, proposal and event format) with declared,
 unauthenticated origins. Aven proposes; Root decides: a recorded proposal is not
 a permission, approval or decision. See the
-[AVEN-011 report](docs/AVEN_011_REPORT.md).
+[AVEN-011 report](docs/AVEN_011_REPORT.md); AVEN-011 is frozen at tag
+`aven-011`.
+
+The [Root policy package](packages/root-policy/README.md) adds the AVEN-012
+candidate: a Root-controlled, digested policy (risk classification, tool action
+catalog, least-privilege grants), independent revalidation of AVEN-011
+proposals, approval verification, and deterministic `ALLOW`, `DENY` or
+`REQUIRE_OWNER_APPROVAL` decisions in the frozen AVEN-002 decision contract; a
+gateway that evaluates recorded proposals read-only at a Root clock; and one
+recorder that appends a `policy_decision` event through the Ledger. Requested
+authority, declared risk and cited approvals are never authority. Approval-based
+`ALLOW` requires a Root-held authentication capability, and the only one is a
+synthetic test capability. See the [AVEN-012 report](docs/AVEN_012_REPORT.md).
 
 **What the repository still does not have:** a live model provider or network
 model call; a general conversational agent (no HTTP route generates a response);
 a learning loop or any durable automatic learning from corrections; an
-owner-state writer; an authenticated owner identity or Root gateway; permission
-decisions; tool execution; a scorer; a web app; any completed v0.1 experiment or
-demonstrated C-versus-B advantage. EXP-001 has not been run. This is a research
-codebase, not a finished personal AI assistant.
+owner-state writer; an authenticated owner identity or any real owner
+authentication of approvals; Root process or OS-level isolation (the Root
+gateway is an in-process prototype); tool execution; a scorer; a web app; any
+completed v0.1 experiment or demonstrated C-versus-B advantage. EXP-001 has not
+been run. This is a research codebase, not a finished personal AI assistant.
 
 ## Start here
 
@@ -112,10 +127,10 @@ invoke a nested `pnpm`.
 `pnpm format` formats repository text. `pnpm format:check`, `pnpm typecheck`,
 `pnpm experiment:check`, and `pnpm test` can run separately. Typechecking covers
 repository tooling, contracts, storage, Ledger, runtime, baseline, Context
-Broker, owner model, corrections, and the API app, including compile-time API
-checks. Tests validate contract boundaries, SQLite and Ledger integrity,
-experiment metadata, and freeze gates; passing them is not evidence of learning
-quality or runtime security.
+Broker, owner model, corrections, action proposals, Root policy and the API app,
+including compile-time API checks. Tests validate contract boundaries, SQLite
+and Ledger integrity, experiment metadata, and freeze gates; passing them is not
+evidence of learning quality or runtime security.
 
 Dependencies are pinned and locked. Strict TypeScript, Zod metadata validation,
 Prettier, YAML parsing, and Vitest are available at the root. The contracts
@@ -128,14 +143,15 @@ database tests; `pnpm --filter @aven/ledger test` runs Ledger tests;
 `pnpm --filter @aven/owner-model test` runs owner-model tests;
 `pnpm --filter @aven/corrections test` runs correction tests;
 `pnpm --filter @aven/action-proposals test` runs action-proposal tests;
+`pnpm --filter @aven/root-policy test` runs Root policy tests;
 `pnpm dataset:check` validates the frozen AVEN-007 dataset against its manifest.
 `pnpm attribution:check` audits the frozen AVEN-010 commits with their original
 rules and requires every later commit to have the owner as author and committer
-with exactly one `Co-authored-by: Claude <noreply@anthropic.com>` trailer; for
-AVEN-011 it also enforces the versioned file governance (see
-`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). It needs full Git history, is
-deliberately separate from `pnpm check`, reads commit metadata and is not
-authentication. `pnpm db:migrate` creates or migrates the ignored local
+with exactly one `Co-authored-by: Claude <noreply@anthropic.com>` trailer; it
+also enforces the versioned file governance of the closed AVEN-011 era and of
+AVEN-012 (see `docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). It needs full Git
+history, is deliberately separate from `pnpm check`, reads commit metadata and
+is not authentication. `pnpm db:migrate` creates or migrates the ignored local
 `data/aven.sqlite`; it does not record owner experience.
 `pnpm api:start --owner owner_local` declares a local owner and serves the
 AVEN-005 API on `127.0.0.1:4317` (loopback only); `pnpm --filter @aven/api test`
@@ -162,15 +178,18 @@ aven/
   packages/      contracts, storage, ledger, runtime (AVEN-006), baseline
                  (AVEN-007), context-broker (AVEN-008), owner-model
                  (AVEN-009), corrections (AVEN-010), action-proposals
-                 (AVEN-011); root, learning, eval, test-utils (placeholders)
+                 (AVEN-011), root-policy (AVEN-012); root, learning, eval,
+                 test-utils (placeholders)
   tooling/       scripts, bootstrap tests and the attribution gate
 ```
 
 `packages/contracts`, `packages/storage`, `packages/ledger`, `packages/runtime`,
 `packages/baseline`, `packages/context-broker`, `packages/owner-model`,
-`packages/corrections`, `packages/action-proposals`, and `apps/api` are private
-workspace packages. Other app/package directories remain placeholders containing
-`.gitkeep` only.
+`packages/corrections`, `packages/action-proposals`, `packages/root-policy`, and
+`apps/api` are private workspace packages. The frozen `packages/root`
+placeholder is unchanged: a frozen AVEN-010 tripwire pins it, so AVEN-012 lives
+in its own package directory. Other app/package directories remain placeholders
+containing `.gitkeep` only.
 
 ## Experiment and authority
 
@@ -209,8 +228,14 @@ current-task/current-session overrides, separate from durable learning: an
 immediate override is transient task context, never owner memory, a trusted
 preference or Root approval. AVEN-010 is frozen at tag `aven-010` (`76535d8`).
 AVEN-011 adds only the Action Proposal Boundary: typed, recorded proposals with
-no policy decision, approval, execution, learning or API wiring; its Patches 1-5
-are accepted and committed and Patch 6 is a candidate pending independent
-review. AVEN-012 (Root) and later work remain unauthorized and not started. The
-AVEN-001 source summaries and experiment documents retain their historical
+no policy decision, approval, execution, learning or API wiring; it is frozen at
+tag `aven-011` (`44ba416`). The AVEN-012 candidate adds only Root policy
+evaluation and decision recording: Root-controlled rules, grants and risk,
+deterministic decisions, approval verification with a synthetic (test-only)
+authentication capability, and one audited Ledger append per decision. It
+executes no tool, authenticates nobody, writes no owner state, learns nothing
+and is not wired into the API; a recorded decision is not a standing permission,
+and a future executor (AVEN-013) must recheck parameter bytes and Root's
+decision at use. AVEN-013 and later work remain unauthorized and not started.
+The AVEN-001 source summaries and experiment documents retain their historical
 milestone context; the current authorization is recorded in `AGENTS.md`.

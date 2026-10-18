@@ -1,7 +1,9 @@
 # @aven/root-policy
 
 AVEN-012 Root Policy Gateway: the pure Root policy engine (Patch 2) and Root
-over recorded history, with audited decision recording (Patch 3). Version
+over recorded history, with audited decision recording (Patch 3), exercised by
+an adversarial campaign (Patch 4; see
+[the AVEN-012 report](../../docs/AVEN_012_REPORT.md)). Version
 `aven-012-root-policy-v1`. Aven proposes; Root decides.
 
 Given a Root-controlled policy and an AVEN-011 action proposal, Root revalidates
@@ -195,6 +197,13 @@ errors carry the storage outcome.
 ## Tests
 
 `pnpm --filter @aven/root-policy test` runs this package's tests on synthetic
-data, including the AVEN-011 golden digest vectors, in-memory SQLite through the
-frozen storage and Ledger, injected COMMIT faults and static boundary tripwires
-(pattern checks, not security proofs).
+data, including the AVEN-011 golden digest vectors, in-memory and file-backed
+SQLite through the frozen storage and Ledger, injected COMMIT and read faults,
+the adversarial campaign (forged, replayed, stale, expired and revoked
+approvals; approval history at and beyond the 64-version bound; declared-risk
+lies; cross-owner and cross-task references; digest mismatches; unknown
+operations; policy version changes; hostile text), a fresh-process `query_only`
+replay, a seeded invariant sweep with an independent approval oracle, and static
+boundary tripwires (pattern checks, not security proofs). Tests that spawn a
+process, use file-backed SQLite or sweep thousands of cases carry explicit
+timeouts instead of the 5-second default.

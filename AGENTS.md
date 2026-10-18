@@ -56,24 +56,31 @@ enforces the exact file inventory):
 
 1. Governance: the successor gate (`aven-012-governance-v1`), its policy
    document, the CI workflow (which also runs the unchanged AVEN-011 checks at
-   the `aven-011` tag) and this file. **Candidate.**
+   the `aven-011` tag) and this file. **Independently approved; owner commit
+   `f3ffdf7e72365b511541af596c82a27975534d59` (T12); GitHub CI passed.**
 2. Pure Root policy engine: Root-controlled policy definitions, independent
    AVEN-011 v1 revalidation, approval verification and deterministic evaluation.
-   **Candidate.**
+   **Independently approved; owner commit
+   `fd9b873b1bfc9fda7e231dff96ff30b86a09e00d`.**
 3. Approval checks and audited recording: read-only evaluation of recorded
    proposals at the Root clock, one frozen Ledger `policy_decision` append and
-   read-only reconciliation. **Candidate.**
+   read-only reconciliation. **Original rejected (finding F1: a revocation
+   beyond the recorder's 65-row history read); corrected candidate pending
+   independent review.**
 4. Adversarial campaign and the AVEN-012 report, with status reconciliation.
-   **Candidate.**
+   **Original rejected (finding F2: the recording window was overstated, and it
+   carried the F1 recorder); corrected candidate, built on the corrected Patch
+   3, pending independent review.**
 
 Trusted evaluator: T's gate (`3761c77`) with `--governance-frozen-at T`
 deliberately rejects Patch 1, which changes the governance files; that refusal
 is the guard working and is never bypassed or presented as approval. Patch 1 is
 judged as an independently reviewed governance transition (procedure in
-`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). Only after the owner-created Patch 1
-commit is independently accepted does its SHA become the AVEN-012 trusted
-reference `T12`; reviewers then run `T12`'s gate, not the candidate's, against
-Patches 2 to 4 with `--governance-frozen-at T12`. Candidate CI is advisory.
+`docs/POST_AVEN010_COMMIT_ATTRIBUTION.md`). The owner-created Patch 1 commit
+`f3ffdf7e72365b511541af596c82a27975534d59`, independently accepted, is the
+AVEN-012 trusted reference `T12`; reviewers run `T12`'s gate, not the
+candidate's, against Patches 2 to 4 with `--governance-frozen-at T12`. Candidate
+CI is advisory.
 
 Design boundaries of the AVEN-012 candidates:
 
@@ -357,7 +364,11 @@ Consequences:
   integration (including a cross-layer campaign on file-backed SQLite), and the
   AVEN-011 proposal construction, digest golden vectors, recorder,
   reconciliation, historical reader and a cross-layer campaign (including a
-  fresh-process `query_only` replay and Root-nonauthority checks), all on
+  fresh-process `query_only` replay and Root-nonauthority checks), and the
+  AVEN-012 Root policy definitions, independent proposal revalidation (AVEN-011
+  golden vectors), approval verification, evaluation rules, gateway, decision
+  recorder, reconciliation and an adversarial campaign (including a
+  fresh-process `query_only` replay and a seeded invariant sweep), all on
   synthetic data, not a complete Aven runtime. Run `pnpm attribution:check`
   before every push. Report limitations honestly.
 - Keep raw owner data, credentials, private eval cases, and local databases out
@@ -487,14 +498,27 @@ AVEN-011 write (one frozen Ledger append), the read-only
 classifies recorded proposal events with declared, unauthenticated origins and
 unverified approval citations. A recorded proposal is never a permission,
 approval or Root decision; the package decides, executes and learns nothing and
-is not wired into the API. Other app/package directories remain placeholders.
-Tooling schemas still describe experimental metadata only. No live provider
-adapter or network model call, Strands or other framework adapter, public
-generation route, durable owner-state writer, learning algorithms, correction
-interpretation from free text, learned negative-signal generation, routing,
-streaming, tool calling, Root enforcement, authentication, UI, execution,
-scorer, promotion controller, or agent orchestration in this milestone. Stop
-after each patch and report files, checks, attribution status, assumptions, and
-deliberate deferrals for external review. Commit only to the isolated milestone
-branch named in the current authorization section (for AVEN-011,
-`aven-011/action-proposals`); do not merge or tag.
+is not wired into the API. `packages/root-policy` (`@aven/root-policy`, version
+`aven-012-root-policy-v1`; see its README and `docs/AVEN_012_REPORT.md`) holds
+the AVEN-012 candidate. Its pure root entry validates and registers
+Root-controlled policy definitions (digest protocol
+`AVEN-012-ROOT-POLICY-DIGEST-V1`), revalidates AVEN-011 v1 proposals
+independently, verifies approval records and evaluates to frozen AVEN-002
+`PolicyDecision`s. The `./ledger` subpath holds the Root gateway (Root clock,
+read-only evaluation of recorded proposals in one read snapshot),
+`recordRootDecision`, the only AVEN-012 write (one frozen Ledger append of a
+`policy_decision` event for a gateway-produced evaluation), and the read-only
+`reconcileRootDecisionRecording`. The `./testing` subpath holds the synthetic
+approval authentication capability, which authenticates nobody. A recorded
+decision is never a standing permission; the package executes and learns nothing
+and is not wired into the API. Other app/package directories remain
+placeholders. Tooling schemas still describe experimental metadata only. No live
+provider adapter or network model call, Strands or other framework adapter,
+public generation route, durable owner-state writer, learning algorithms,
+correction interpretation from free text, learned negative-signal generation,
+routing, streaming, tool calling, real owner authentication, OS-level Root
+isolation, UI, execution, scorer, promotion controller, or agent orchestration
+in this milestone. Stop after each patch and report files, checks, attribution
+status, assumptions, and deliberate deferrals for external review. Commit only
+to the isolated milestone branch named in the current authorization section (for
+AVEN-012, `aven-012/root-policy-gateway`); do not merge or tag.
