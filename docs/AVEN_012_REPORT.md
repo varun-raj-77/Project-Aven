@@ -1,16 +1,16 @@
 # AVEN-012 report: Root Policy Gateway
 
-Status recorded **2026-10-17, at preparation of the corrected Patches 3 and 4**:
-the four AVEN-012 patches were first prepared together by the builder (Claude)
-on 2026-10-15. **Patch 1 was independently approved and committed by the owner
-as `f3ffdf7e72365b511541af596c82a27975534d59` (T12); Patch 2 was independently
-approved and committed by the owner as
-`fd9b873b1bfc9fda7e231dff96ff30b86a09e00d`.** The independent review of
-2026-10-17 rejected the original Patches 3 and 4 for findings F1 and F2 (section
-D). This report is part of the **corrected Patch 4 candidate**, built on the
-corrected Patch 3 candidate; neither is reviewed, accepted or committed, and
-nothing is merged or tagged. No model was called. Nothing in this report is an
-experimental result, and no C-versus-B claim is made.
+Status recorded **2026-10-18, by the final status amendment**: **all four
+AVEN-012 implementation patches were independently approved, committed by the
+owner and passed GitHub CI** (section R). The approved implementation head of
+`aven-012/root-policy-gateway` is `6b5fd65baf5417908678b1468e09c13f52c31dac`.
+AVEN-012 is **implemented and awaiting final acceptance, merge and the annotated
+`aven-012` tag**: it is not merged into `main`, not tagged and not frozen. This
+amendment changes this report only and needs its own independent review. The
+original Patches 3 and 4 were rejected on 2026-10-17 for findings F1 and F2 and
+replaced by corrected candidates before any commit (section D). No model was
+called. Nothing in this report is an experimental result, and no C-versus-B
+learning advantage has been demonstrated.
 
 Baseline: frozen AVEN-011, annotated tag `aven-011` (tag object
 `56a0e883b17b03be080af50ce5f60c692d409b83`), commit
@@ -21,18 +21,18 @@ Package documentation:
 
 **Evidence classes.** This report keeps five kinds of evidence apart:
 
-- **Repository evidence:** code and tests in the candidates that anyone can
-  re-run.
+- **Repository evidence:** code and tests in the four committed patches that
+  anyone can re-run.
 - **Builder-reported:** results of commands the builder ran on the owner's
   Windows machine while preparing the candidates, including runs on disposable
   rehearsal commits in an isolated clone. Reviewers should re-run them.
 - **Independent:** review verdicts and validation by the independent reviewer:
-  Patch 1 approved (2026-10-16); Patch 2 approved and Patches 3 and 4 rejected
-  with findings F1 and F2 (2026-10-17). The corrected Patches 3 and 4 are not
-  yet reviewed.
-- **GitHub CI:** the repository's CI on committed patches: the run on T12
-  (`39000599788`) passed, as relayed by the independent review. No CI exists for
-  the corrected Patches 3 and 4.
+  Patch 1 approved (2026-10-16); Patch 2 approved and the original Patches 3 and
+  4 rejected with findings F1 and F2 (2026-10-17); the corrected Patch 3
+  approved (checks 2026-10-17, finalized 2026-10-18) and the corrected Patch 4
+  approved (2026-10-18). This status amendment is not yet reviewed.
+- **GitHub CI:** the repository's `Owner-first attribution` workflow on each
+  owner commit; all four runs completed successfully (section R).
 - **Pending:** steps that have not happened (section Q). They are never reported
   as passed.
 
@@ -75,6 +75,8 @@ recording; AVEN-013.
 | Frozen AVEN-011 (`main`)       | `44ba416d90624be67fde2fab31c716e8298648bb` | Annotated tag `aven-011` (tag object `56a0e883…`)       |
 | AVEN-012 trusted reference T12 | `f3ffdf7e72365b511541af596c82a27975534d59` | Owner commit of the approved Patch 1 (tree `b623b608…`) |
 | AVEN-012 Patch 2               | `fd9b873b1bfc9fda7e231dff96ff30b86a09e00d` | Owner commit of the approved Patch 2 (tree `364db8d1…`) |
+| AVEN-012 Patch 3               | `fad845c69b38025d8a9a2eabad9f9114180eba71` | Owner commit of corrected Patch 3 (tree `cce3de9b…`)    |
+| AVEN-012 Patch 4 (head)        | `6b5fd65baf5417908678b1468e09c13f52c31dac` | Owner commit of corrected Patch 4 (tree `10b7e45a…`)    |
 
 Patch 1 extends the owner-first attribution gate
 (`tooling/attribution/check-post-aven010.mjs`) to governance version
@@ -133,12 +135,12 @@ T12's gate and
 
 ## D. Patch plan and status
 
-| Patch | Content                                                                                | Status (2026-10-17)                                    |
-| ----- | -------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| 1     | Successor governance: gate, policy document, CI workflow, `AGENTS.md`                  | Approved; owner commit `f3ffdf7` (T12); CI passed      |
-| 2     | Pure Root policy engine, package scaffold, typecheck wiring, lockfile importer         | Approved; owner commit `fd9b873`                       |
-| 3     | Gateway over recorded proposals, approval history checks, decision recorder, reconcile | Rejected (F1); corrected candidate                     |
-| 4     | Adversarial campaign, this report, status reconciliation, root description             | Rejected (F2, and F1 in its tree); corrected candidate |
+| Patch | Content                                                                                | Status (2026-10-18)                                                                                         |
+| ----- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 1     | Successor governance: gate, policy document, CI workflow, `AGENTS.md`                  | Approved; owner commit `f3ffdf7` (T12); CI passed                                                           |
+| 2     | Pure Root policy engine, package scaffold, typecheck wiring, lockfile importer         | Approved; owner commit `fd9b873`; CI passed                                                                 |
+| 3     | Gateway over recorded proposals, approval history checks, decision recorder, reconcile | Original rejected (F1); corrected candidate approved; owner commit `fad845c`; CI passed                     |
+| 4     | Adversarial campaign, this report, status reconciliation, root description             | Original rejected (F2, and F1 in its tree); corrected candidate approved; owner commit `6b5fd65`; CI passed |
 
 Each patch is one owner commit, reviewed and committed in order. The rejected
 Patches 3 and 4 were never committed, so their corrections are revised
@@ -296,9 +298,26 @@ claimed.
   approval-based `ALLOW` relied on). Measured deltas of one recording:
   `experience_events` +1, `policy_decisions` +1, `record_keys` +2,
   `record_versions` +2, `record_references` +4, and nothing else.
-- **Outcomes**, as AVEN-011: `not_written`; `rolled_back` for checks the Ledger
-  raises in its open transaction; `unknown` for every storage failure, including
-  a COMMIT that fails or takes effect and then raises.
+- **Outcomes**, as AVEN-011, each failure carrying one of three:
+  - `not_written` for every failure before the append can have started: invalid
+    or foreign input, the entry-time age check, and Root's own read-only
+    prechecks, including a `storage_failure` from a failed read or from a
+    transaction the caller left open; and for a Ledger refusal reported before
+    its transaction began (`rollback: 'not_started'`, including its
+    `transaction_active` and `storage_failure`);
+  - `rolled_back` for checks the Ledger raises in its open transaction and
+    reports as rolled back (duplicate identifiers, rejected events or
+    references, unknown owner, session or task, integrity failures, invalid
+    input and cross-owner references);
+  - `unknown` only when the append's effect is genuinely uncertain: a Ledger
+    `storage_failure` reported during its transaction (it may not have executed
+    ROLLBACK), a failed rollback, including a COMMIT that fails or takes effect
+    and then raises, an unrecognised Ledger failure, a non-Ledger error from the
+    append, and any failure after the append returned.
+
+  The exact mapping is `ledgerFailure` in `src/ledger/record.ts`, pinned case by
+  case in `test/record.test.ts`.
+
 - **Reconciliation.**
   `reconcileRootDecisionRecording(storage, evaluation, { eventId })` only reads
   and returns `recorded`, `not_recorded`, `conflict` or `unresolved`. After
@@ -401,7 +420,7 @@ commits on the owner's actual Patch 2 commit:
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | Owner's Patch 2 commit `fd9b873`     | PASS (AVEN-012 milestone commits 2)                                                                                        |
 | Corrected Patch 3 (tree `cce3de9b…`) | PASS (3)                                                                                                                   |
-| Corrected Patch 4 (this patch)       | PASS (4)                                                                                                                   |
+| Corrected Patch 4 (tree `10b7e45a…`) | PASS (4)                                                                                                                   |
 | T12 gate `--self-test`               | PASS: 6 controls and 54 violations (open AVEN-011 era) and 6 controls and 44 violations (closed AVEN-011 and AVEN-012 era) |
 
 No governance file, frozen source or frozen test changed in either corrected
@@ -457,32 +476,33 @@ explicit paths only.
 
 ## N. Validation status
 
-| Check                                                    | Scope                                    | Result                                                                                                                                                                 | Class                           |
-| -------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| Baseline `check`, literal default runner                 | untouched `aven-011` worktree            | 2,057 passed, 9 failed: all 9 are 5-second timeouts in frozen AVEN-009 to AVEN-011 paging and determinism tests                                                        | Builder-reported                |
-| Frozen `aven-011` `check` and T's gate                   | annotated tag `aven-011`                 | passed: 2,066 tests in 58 files; gate PASS                                                                                                                             | Builder-reported                |
-| Frozen `aven-010` `check` and original attribution check | annotated tag `aven-010`                 | passed: 1,899 tests in 56 files; original check PASS (16 commits)                                                                                                      | Builder-reported                |
-| Full `check` (Windows options)                           | rehearsal Patch 1                        | passed: 2,066 tests in 58 files; new gate frozen at rehearsal T12 PASS; self-test PASS                                                                                 | Builder-reported                |
-| Full `check` (Windows options)                           | rehearsal Patch 2                        | passed: 2,235 tests in 65 files                                                                                                                                        | Builder-reported                |
-| Full `check` (Windows options)                           | rehearsal Patch 3                        | passed: 2,325 tests in 68 files                                                                                                                                        | Builder-reported                |
-| Full `check` (Windows options)                           | rehearsal Patch 4                        | passed: 2,354 tests in 69 files; new gate frozen at rehearsal T12 PASS                                                                                                 | Builder-reported                |
-| Literal default-runner `check`                           | all four patches applied (worktree)      | 2,343 passed, 11 failed: all 11 are 5-second timeouts in frozen AVEN-009 to AVEN-011 paging and determinism tests (the baseline pattern); no `root-policy` test failed | Builder-reported                |
-| Six excluded historical suites                           | `aven-011` versus all four patches       | 190 passed and the same 6 failed (of 196) at both, identical failure set (obsolete frozen expectations); no frozen test edited, no exclusion added                     | Builder-reported                |
-| Gate self-test                                           | Patch 1 gate                             | passed (see section L)                                                                                                                                                 | Builder-reported                |
-| Separability                                             | patches applied with `git apply --index` | each patch, applied in order to `aven-011`, reproduces its recorded result tree (see the review bundles)                                                               | Builder-reported                |
-|                                                          | Full `check` (Windows options)           | corrected Patch 3 (rehearsal on `fd9b873`)                                                                                                                             | passed: 2,341 tests in 68 files | Builder-reported |
-| Full `check` (Windows options)                           | corrected Patch 4                        | passed: 2,374 tests in 69 files                                                                                                                                        | Builder-reported                |
-| F1 negative control                                      | original Patch 3 recorder blobs          | 9 of the new F1 tests fail; the version-66 attack is recorded as ALLOW there                                                                                           | Builder-reported                |
-| F1 and F2 regressions                                    | corrected blobs                          | 20 of 20 pass (16 in `record.test.ts`, 4 in the campaign)                                                                                                              | Builder-reported                |
-| Reviewer's own F1 and F2 probes                          | corrected tree (import paths adjusted)   | F1: versions 2 and 64 `stale_evaluation`, 65 and 66 `invalid_history`, zero decisions written; F2 witness still records (documented limitation)                        | Builder-reported                |
-| Six excluded historical suites                           | corrected Patch 4                        | 190 passed and the same 6 failed (of 196) as at `aven-011`; identical failure set                                                                                      | Builder-reported                |
-| Separability                                             | corrected patches, `git apply --index`   | corrected Patch 3 on the owner's Patch 2 tree, then corrected Patch 4 on its result, reproduce both recorded result trees                                              | Builder-reported                |                  |
-| Independent review                                       | Patches 1 and 2                          | approved (2026-10-16 and 2026-10-17)                                                                                                                                   | Independent                     |
-| Independent review                                       | original Patches 3 and 4                 | rejected: F1 and F2 (2026-10-17)                                                                                                                                       | Independent                     |
-| Independent review                                       | corrected Patches 3 and 4                | **pending**                                                                                                                                                            | Pending                         |
-| GitHub CI                                                | owner commit T12 (Patch 1)               | passed, run `39000599788` (relayed by the independent review)                                                                                                          | GitHub CI                       |
-| GitHub CI                                                | owner commits of Patches 2, 3 and 4      | **pending** (none claimed)                                                                                                                                             | Pending                         |
-| Real-model or end-to-end experiment                      | out of scope                             | not run; `execution: not_run` unchanged                                                                                                                                | n/a                             |
+| Check                                                    | Scope                                    | Result                                                                                                                                                                 | Class            |
+| -------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| Baseline `check`, literal default runner                 | untouched `aven-011` worktree            | 2,057 passed, 9 failed: all 9 are 5-second timeouts in frozen AVEN-009 to AVEN-011 paging and determinism tests                                                        | Builder-reported |
+| Frozen `aven-011` `check` and T's gate                   | annotated tag `aven-011`                 | passed: 2,066 tests in 58 files; gate PASS                                                                                                                             | Builder-reported |
+| Frozen `aven-010` `check` and original attribution check | annotated tag `aven-010`                 | passed: 1,899 tests in 56 files; original check PASS (16 commits)                                                                                                      | Builder-reported |
+| Full `check` (Windows options)                           | rehearsal Patch 1                        | passed: 2,066 tests in 58 files; new gate frozen at rehearsal T12 PASS; self-test PASS                                                                                 | Builder-reported |
+| Full `check` (Windows options)                           | rehearsal Patch 2                        | passed: 2,235 tests in 65 files                                                                                                                                        | Builder-reported |
+| Full `check` (Windows options)                           | rehearsal Patch 3                        | passed: 2,325 tests in 68 files                                                                                                                                        | Builder-reported |
+| Full `check` (Windows options)                           | rehearsal Patch 4                        | passed: 2,354 tests in 69 files; new gate frozen at rehearsal T12 PASS                                                                                                 | Builder-reported |
+| Literal default-runner `check`                           | all four patches applied (worktree)      | 2,343 passed, 11 failed: all 11 are 5-second timeouts in frozen AVEN-009 to AVEN-011 paging and determinism tests (the baseline pattern); no `root-policy` test failed | Builder-reported |
+| Six excluded historical suites                           | `aven-011` versus all four patches       | 190 passed and the same 6 failed (of 196) at both, identical failure set (obsolete frozen expectations); no frozen test edited, no exclusion added                     | Builder-reported |
+| Gate self-test                                           | Patch 1 gate                             | passed (see section L)                                                                                                                                                 | Builder-reported |
+| Separability                                             | patches applied with `git apply --index` | each patch, applied in order to `aven-011`, reproduces its recorded result tree (see the review bundles)                                                               | Builder-reported |
+| Full `check` (Windows options)                           | corrected Patch 3 (rehearsal)            | passed: 2,341 tests in 68 files                                                                                                                                        | Builder-reported |
+| Full `check` (Windows options)                           | corrected Patch 4                        | passed: 2,374 tests in 69 files                                                                                                                                        | Builder-reported |
+| F1 negative control                                      | original Patch 3 recorder blobs          | 9 of the new F1 tests fail; the version-66 attack is recorded as ALLOW there                                                                                           | Builder-reported |
+| F1 and F2 regressions                                    | corrected blobs                          | 20 of 20 pass (16 in `record.test.ts`, 4 in the campaign)                                                                                                              | Builder-reported |
+| Reviewer's own F1 and F2 probes                          | corrected tree (import paths adjusted)   | F1: versions 2 and 64 `stale_evaluation`, 65 and 66 `invalid_history`, zero decisions written; F2 witness still records (documented limitation)                        | Builder-reported |
+| Six excluded historical suites                           | corrected Patch 4                        | 190 passed and the same 6 failed (of 196) as at `aven-011`; identical failure set                                                                                      | Builder-reported |
+| Separability                                             | corrected patches, `git apply --index`   | corrected Patch 3 on the owner's Patch 2 tree, then corrected Patch 4 on its result, reproduce both recorded result trees                                              | Builder-reported |
+| Independent review                                       | Patches 1 and 2                          | approved (2026-10-16 and 2026-10-17)                                                                                                                                   | Independent      |
+| Independent review                                       | original Patches 3 and 4                 | rejected: F1 and F2 (2026-10-17)                                                                                                                                       | Independent      |
+| Independent review                                       | corrected Patch 3                        | approved (checks 2026-10-17, finalized 2026-10-18): `check` 2,341 tests in 68 files; 27 probes, version-66 attack refused with zero writes; trusted T12 gate PASS      | Independent      |
+| Independent review                                       | corrected Patch 4                        | approved (2026-10-18): `check` 2,374 tests in 69 files; 27 probes; six excluded suites with the same six failures; trusted T12 gate PASS                               | Independent      |
+| GitHub CI                                                | owner commits of Patches 1 to 4          | passed: runs `39000599788`, `39049373006`, `39106022147` and `39142134173` (section R)                                                                                 | GitHub CI        |
+| Independent review                                       | this status amendment                    | **pending**                                                                                                                                                            | Pending          |
+| Real-model or end-to-end experiment                      | out of scope                             | not run; `execution: not_run` unchanged                                                                                                                                | n/a              |
 
 The rows for Patches 1 to 4 above the corrected rows record the original
 2026-10-15 preparation; the corrected rows record the 2026-10-17 candidates.
@@ -523,25 +543,76 @@ pre-existing tests are unchanged.
 - **Tripwires, not proofs.** Static boundary tests are pattern checks.
 - **Platform and runner.** All builder runs were on Windows; the default
   5-second Vitest timeout is not met by some frozen suites on this machine
-  (section N). Linux CI has not run.
+  (section N). GitHub CI ran the literal `check` on Linux (`ubuntu-latest`) for
+  each owner commit (section R); no other platform was tested.
 
 ## P. Nonclaims
 
-This report does not claim real owner authentication, OS-level or external
-security isolation, tool execution, production readiness, exactly-once
-recording, end-to-end learned intelligence or any experimental result. Package
-separation and these tests are not runtime security.
+This report does not claim real owner authentication (approval authentication is
+synthetic and test-only), OS-level or external security isolation, actual tool
+execution, production readiness, exactly-once recording, atomic freshness
+between Root's precheck and the Ledger write, that a stored `ALLOW` is present
+execution authority, end-to-end learned intelligence, any experimental result or
+any C-versus-B learning advantage (none has been demonstrated). Package
+separation and these tests are not runtime security. Independent approval, owner
+commits and passing CI establish that the reviewed bytes were committed and
+checked; they do not establish any of the above.
 
 ## Q. Remaining steps
 
 1. Complete: independent approval of Patch 1, owner commit `f3ffdf7` (T12) and
    its GitHub CI.
-2. Complete: independent approval of Patch 2 and owner commit `fd9b873`.
-3. Pending: independent review of the corrected Patch 3, with T12's gate and
-   `--governance-frozen-at T12`; a separate verdict; owner commit; GitHub CI.
-4. Pending: independent review of the corrected Patch 4 on the committed Patch
-   3; a separate verdict; owner commit; GitHub CI.
-5. Pending: a separately reviewed status amendment and an explicitly authorized
-   acceptance, merge and annotated `aven-012` tag.
+2. Complete: independent approval of Patch 2, owner commit `fd9b873` and its
+   GitHub CI.
+3. Complete: independent approval of the corrected Patch 3 (T12's gate with
+   `--governance-frozen-at T12`), owner commit `fad845c` and its GitHub CI.
+4. Complete: independent approval of the corrected Patch 4 on the committed
+   Patch 3, owner commit `6b5fd65` and its GitHub CI.
+5. Pending: independent review of this status amendment; if approved, its owner
+   commit, T12's trusted gate and GitHub CI.
+6. Pending: an explicitly authorized final acceptance of AVEN-012, merge into
+   `main` and the annotated `aven-012` tag.
 
-Steps 3 to 5 are not claimed as completed.
+Steps 5 and 6 are not claimed as completed. AVEN-013 is not started.
+
+## R. Final implementation identities (2026-10-18)
+
+All four implementation commits are on `aven-012/root-policy-gateway`, each the
+sole parent of the next, starting from frozen AVEN-011 `44ba416d…`. GitHub
+attributes author and committer of each to the owner's account `varun-raj-77`
+(Varun Karthik, account-linked noreply address); the commits are not
+cryptographically signed. Each message ends with exactly one
+`Co-authored-by: Claude <noreply@anthropic.com>` trailer.
+
+| Patch | Owner commit                               | Tree                                       | Independent verdict                     | GitHub CI run (success)                                                                |
+| ----- | ------------------------------------------ | ------------------------------------------ | --------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1     | `f3ffdf7e72365b511541af596c82a27975534d59` | `b623b60894804c1bc81447ef48475465481bac5e` | approved 2026-10-16                     | [`39000599788`](https://github.com/varun-raj-77/Project-Aven/actions/runs/39000599788) |
+| 2     | `fd9b873b1bfc9fda7e231dff96ff30b86a09e00d` | `364db8d150ef5bd60952e6386a8b10995c461f77` | approved 2026-10-17                     | [`39049373006`](https://github.com/varun-raj-77/Project-Aven/actions/runs/39049373006) |
+| 3     | `fad845c69b38025d8a9a2eabad9f9114180eba71` | `cce3de9bfe019765a8731a0fe786f642789ca1a0` | corrected candidate approved 2026-10-18 | [`39106022147`](https://github.com/varun-raj-77/Project-Aven/actions/runs/39106022147) |
+| 4     | `6b5fd65baf5417908678b1468e09c13f52c31dac` | `10b7e45a6b4d1c8fd5a3e5fc7754c40adf734878` | corrected candidate approved 2026-10-18 | [`39142134173`](https://github.com/varun-raj-77/Project-Aven/actions/runs/39142134173) |
+
+Each commit's tree equals the tree of the bytes its independent review approved.
+Each CI run is the `Owner-first attribution` workflow on a `pull_request` event,
+checked out at exactly that commit on `ubuntu-latest` (Node 24, pnpm 11.19.0),
+completed with conclusion `success`: the gate's `--self-test` and the gate on
+the commit's history; the literal `scripts.check` on the current tree; and the
+unchanged AVEN-010 and AVEN-011 checks at their frozen tags. CI runs the
+candidate tree's gate; the trusted evaluation with T12's own gate bytes and
+`--governance-frozen-at f3ffdf7e72365b511541af596c82a27975534d59` is the
+independent reviews' evidence (and the builder's), not CI's.
+
+**Acceptance status.** AVEN-012 is implemented: every patch is approved,
+committed and green. It is **not** finally accepted, merged, tagged or frozen:
+`main` remains frozen AVEN-011 `44ba416d90624be67fde2fab31c716e8298648bb`, no
+`aven-012` tag exists, and the draft pull request from
+`aven-012/root-policy-gateway` is open and unmerged.
+
+**Outstanding limitations** (details in sections J, O and P): approval
+authentication is synthetic and test-only; a stored `ALLOW` is a claim about one
+evaluation, never present execution authority, and a future executor must obtain
+a current Root evaluation and recheck the real parameter bytes; the recording
+window is an entry-time age check, so atomic freshness between the precheck and
+the Ledger write is not guaranteed; approvals with more than 64 versions are
+refused; there is no OS-level or process isolation, no actual tool execution, no
+exactly-once recording and no approval consumption; and no C-versus-B learning
+advantage has been demonstrated.
