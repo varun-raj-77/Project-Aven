@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AVEN-012 Root Policy Gateway: pure Root policy engine (root) that revalidates AVEN-011 proposals and returns frozen AVEN-002 ALLOW, DENY or REQUIRE_OWNER_APPROVAL decisions from Root-controlled policy, grants and verified approvals; ./testing holds the synthetic approval capability. No recording, tool execution, model call or learning",
+  "description": "AVEN-012 Root Policy Gateway: pure Root policy engine (root) that revalidates AVEN-011 proposals and returns frozen AVEN-002 ALLOW, DENY or REQUIRE_OWNER_APPROVAL decisions from Root-controlled policy, grants and verified approvals; ./ledger evaluates recorded proposals read-only at the Root clock and records one decision through one frozen Ledger append; ./testing holds the synthetic approval capability. No tool execution, model call or learning",
   "exports": {
     ".": "./src/index.ts",
+    "./ledger": "./src/ledger/index.ts",
     "./testing": "./src/testing/index.ts"
   },
   "scripts": {
@@ -14,6 +15,8 @@
   },
   "dependencies": {
     "@aven/contracts": "workspace:*",
+    "@aven/ledger": "workspace:*",
+    "@aven/storage": "workspace:*",
     "zod": "4.6.5"
   },
   "devDependencies": {

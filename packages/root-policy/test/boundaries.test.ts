@@ -2,12 +2,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from '../src/index.ts';
 import { ROOT_POLICY_CONFIG } from '../src/index.ts';
+import * as ledgerApi from '../src/ledger/index.ts';
+import { READ_SQL } from '../src/ledger/stored.ts';
 import * as testingApi from '../src/testing/index.ts';
 import { deeplyFrozen } from './fixtures.ts';
 
 /**
- * AVEN-012 Patch 2: static REGRESSION TRIPWIRES over the pure Root policy
- * engine. They make obvious regressions visible in review; they are pattern
+ * AVEN-012 Patches 2 and 3: static REGRESSION TRIPWIRES over the pure Root
+ * policy engine and the `./ledger` subpath. They make obvious regressions
+ * visible in review; they are pattern
  * checks, NOT security guarantees, and deliberately obfuscated code can
  * bypass them. Every rule is also run against known-bad samples, so a
  * weakened rule fails here. A later AVEN-012 patch that legitimately adds a
@@ -15,6 +18,7 @@ import { deeplyFrozen } from './fixtures.ts';
  */
 const srcDir = new URL('../src/', import.meta.url);
 const testingDir = new URL('../src/testing/', import.meta.url);
+const ledgerDir = new URL('../src/ledger/', import.meta.url);
 const repoRoot = new URL('../../../', import.meta.url);
 /** Code only: block comments and whole-line `//` comments are removed. */
 const code = (text: string) =>
@@ -144,9 +148,10 @@ function violations(file: string, text: string, local: string[]): string[] {
 const ROOT_LOCAL = SRC_FILES.map((f) => `./${f}`);
 
 describe('pure Root policy engine: static boundaries', () => {
-  it('contains exactly the root modules and the testing subpath', () => {
+  it('contains exactly the root modules and the ledger and testing subpaths', () => {
     const entries = readdirSync(srcDir, { withFileTypes: true });
     expect(entries.filter((e) => e.isDirectory()).map((e) => e.name)).toEqual([
+      'ledger',
       'testing',
     ]);
     expect(
@@ -194,7 +199,7 @@ describe('pure Root policy engine: static boundaries', () => {
   it('the root entry does not expose the synthetic capability', () => {
     const text = sourceOf(srcDir, 'index.ts');
     expect(text).not.toMatch(/createSyntheticApprovalChannel|attest/);
-    expect(text).not.toMatch(/policyInternals|isAuthenticated/);
+    expect(text).not.toMatch(/policyInternals|producedBy|isAuthenticated/);
   });
 
   it.each([
@@ -320,6 +325,212 @@ describe('pure Root policy engine: static boundaries', () => {
   });
 });
 
+/** The `./ledger` subpath: the only modules that may touch storage. */
+const LEDGER_FILES = ['gateway.ts', 'index.ts', 'record.ts', 'stored.ts'];
+const LEDGER_LOCAL = [
+  './gateway.ts',
+  './record.ts',
+  './stored.ts',
+  '../canonical.ts',
+  '../config.ts',
+  '../errors.ts',
+  '../evaluate.ts',
+  '../inert.ts',
+  '../policy.ts',
+  '../proposal.ts',
+  '../timestamps.ts',
+];
+const LEDGER_PERMITTED: Record<string, { names: string[]; files: string[] }> = {
+  '@aven/contracts': {
+    names: [
+      'EventIdSchema',
+      'EvidenceReferenceSchema',
+      'ExperienceEventSchema',
+      'OwnerIdSchema',
+      'PolicyDecisionIdSchema',
+      'PolicyDecisionSchema',
+      'TaskBindingSchema',
+      'TimestampSchema',
+      'EvidenceReference',
+      'ExperienceEvent',
+      'OwnerApproval',
+      'PolicyDecision',
+      'ProposalBinding',
+    ],
+    files: ['gateway.ts', 'record.ts', 'stored.ts'],
+  },
+  '@aven/ledger': {
+    names: ['createLedger', 'LedgerError', 'EventInput'],
+    files: ['record.ts'],
+  },
+  '@aven/storage': {
+    names: ['deserializeContract', 'Storage'],
+    files: ['gateway.ts', 'record.ts', 'stored.ts'],
+  },
+  zod: { names: ['z'], files: ['gateway.ts', 'record.ts'] },
+};
+const LEDGER_FORBIDDEN: [string, RegExp][] = [
+  ...FORBIDDEN_CODE.filter(([label]) => !label.startsWith('storage')),
+  [
+    'runtime or other Aven layers',
+    /@aven\/(runtime|baseline|context-broker|owner-model|corrections|api)\b|better-sqlite3|drizzle/,
+  ],
+  [
+    'SQL write or transaction statement',
+    /\b(INSERT|UPDATE|DELETE|REPLACE|UPSERT|CREATE|DROP|ALTER|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|PRAGMA|ATTACH|DETACH|VACUUM|REINDEX)\b/,
+  ],
+  [
+    'direct connection control',
+    /\.(exec|run|iterate|pragma|backup|serialize|close|function|aggregate|table|loadExtension|unsafeMode|defaultSafeIntegers)\s*\(/,
+  ],
+  [
+    'other Ledger operations',
+    /\b(getEvent|listEvents|replayEvents|inspectIntegrity)\b/,
+  ],
+  ['connection lifecycle', /\b(openStorage|migrate)\b/],
+  [
+    'connection access other than prepare, inTransaction and transaction',
+    /\.sqlite\.(?!prepare\(|inTransaction\b|transaction\()/,
+  ],
+];
+
+function ledgerViolations(file: string, text: string): string[] {
+  const errors: string[] = [];
+  for (const { module, names } of importsOf(text)) {
+    if (module.startsWith('.')) {
+      if (!LEDGER_LOCAL.includes(module))
+        errors.push(`${file}: unknown local module ${module}`);
+      continue;
+    }
+    const rule = LEDGER_PERMITTED[module];
+    if (!rule || !rule.files.includes(file)) {
+      errors.push(`${file}: import from ${module}`);
+      continue;
+    }
+    for (const name of names)
+      if (!rule.names.includes(name))
+        errors.push(`${file}: ${name} from ${module}`);
+  }
+  for (const [label, pattern] of LEDGER_FORBIDDEN)
+    if (pattern.test(text)) errors.push(`${file}: ${label}`);
+  const appends = text.match(/\bappendEvent\b/g)?.length ?? 0;
+  if (appends !== (file === 'record.ts' ? 1 : 0))
+    errors.push(`${file}: ${appends} appendEvent calls`);
+  // One read-snapshot helper owns the only transaction, always deferred.
+  const transactions = text.match(/\.transaction\(/g)?.length ?? 0;
+  const deferred =
+    text.match(/\.transaction\(read\)\.deferred\(\)/g)?.length ?? 0;
+  if (
+    transactions !== (file === 'stored.ts' ? 1 : 0) ||
+    deferred !== transactions
+  )
+    errors.push(`${file}: ${transactions} transactions`);
+  // Only the gateway reads the Root clock, through the configured function.
+  if (file !== 'gateway.ts' && /\bclock\b/.test(text))
+    errors.push(`${file}: clock access`);
+  return errors;
+}
+
+describe('./ledger subpath: static boundaries', () => {
+  it('contains exactly the Patch 3 modules', () => {
+    const entries = readdirSync(ledgerDir, { withFileTypes: true });
+    expect(entries.every((e) => e.isFile())).toBe(true);
+    expect(entries.map((e) => e.name).sort()).toEqual(LEDGER_FILES);
+  });
+
+  it.each(LEDGER_FILES)(
+    '%s imports and calls only what is permitted',
+    (file) => {
+      expect(ledgerViolations(file, sourceOf(ledgerDir, file))).toEqual([]);
+    },
+  );
+
+  it('uses only pinned, owner-scoped SELECT statements', () => {
+    const statements: string[] = Object.values(READ_SQL);
+    expect(statements).toHaveLength(9);
+    for (const sql of statements) {
+      expect(sql).toMatch(
+        /^SELECT [^;]+ FROM [a-z_]+ WHERE owner_id = \?( |$)/,
+      );
+      expect(sql).not.toMatch(/;|--|\/\*/);
+    }
+    expect(Object.isFrozen(READ_SQL)).toBe(true);
+    // No statement outside READ_SQL appears in the subpath.
+    for (const file of LEDGER_FILES) {
+      const text = sourceOf(ledgerDir, file);
+      const literal = text.match(/'SELECT [^']*'/g) ?? [];
+      expect(
+        literal.every((sql) => statements.includes(sql.slice(1, -1))),
+      ).toBe(true);
+    }
+  });
+
+  it('never reads earlier policy decisions as an input to evaluation', () => {
+    // The only statement naming policy_decisions checks identifier use.
+    expect(
+      Object.entries(READ_SQL)
+        .filter(([, sql]) => /policy_decisions/.test(sql))
+        .map(([name]) => name),
+    ).toEqual(['decisionInUse']);
+    expect(sourceOf(ledgerDir, 'gateway.ts')).not.toMatch(/decisionInUse/);
+  });
+
+  it.each([
+    ['record.ts', `import { openStorage } from '@aven/storage';`],
+    ['record.ts', `import { migrate } from '@aven/storage';`],
+    ['stored.ts', `import { createLedger } from '@aven/ledger';`],
+    ['gateway.ts', `import { x } from '@aven/runtime';`],
+    ['gateway.ts', `import { x } from '@aven/action-proposals/ledger';`],
+    ['record.ts', `import { ExecutionResultSchema } from '@aven/contracts';`],
+    ['record.ts', `import Database from 'better-sqlite3';`],
+    ['record.ts', `import { x } from '../ledger-extra.ts';`],
+    ['index.ts', `import { createLedger } from '@aven/ledger';`],
+    ['stored.ts', `storage.sqlite.exec('BEGIN IMMEDIATE');`],
+    ['stored.ts', `db.run();`],
+    ['record.ts', `storage.sqlite.transaction(() => 1).immediate();`],
+    ['stored.ts', `storage.sqlite.transaction(read).immediate();`],
+    ['record.ts', `const q = 'INSERT INTO policy_decisions VALUES (?)';`],
+    ['record.ts', `const q = 'UPDATE owner_approvals SET x = 1';`],
+    ['stored.ts', `storage.sqlite.pragma('foreign_keys = OFF');`],
+    ['stored.ts', `const open = storage.sqlite.open;`],
+    ['gateway.ts', `ledger.appendEvent(event);`],
+    ['record.ts', `ledger.getEvent(id);`],
+    ['stored.ts', `ledger.listEvents();`],
+    ['record.ts', `const t = new Date().toISOString();`],
+    ['record.ts', `const now = internals.clock();`],
+    ['record.ts', `const r = randomUUID();`],
+    ['record.ts', `console.log('x');`],
+    ['gateway.ts', `import { spawn } from 'node:child_process';`],
+  ])('rejects the known-bad sample %# in %s', (file, sample) => {
+    const appended =
+      file === 'record.ts' ? `${sample}\nledger.appendEvent(e);` : sample;
+    const text =
+      file === 'stored.ts'
+        ? `${appended}\nstorage.sqlite.transaction(read).deferred();`
+        : appended;
+    expect(ledgerViolations(file, text).length).toBeGreaterThan(0);
+  });
+
+  it('flags a second append in the recorder', () => {
+    expect(
+      ledgerViolations('record.ts', 'l.appendEvent(a);\nl.appendEvent(b);'),
+    ).toEqual(['record.ts: 2 appendEvent calls']);
+  });
+
+  it('exports exactly the gateway, the recorder and reconciliation', () => {
+    expect(Object.keys(ledgerApi).sort()).toEqual([
+      'createRootGateway',
+      'evaluateRecordedProposal',
+      'reconcileRootDecisionRecording',
+      'recordRootDecision',
+    ]);
+    for (const name of Object.keys(ledgerApi))
+      expect(name).not.toMatch(
+        /execut|approv|learn|promot|grant|send|publish/i,
+      );
+  });
+});
+
 describe('package manifest and dependency direction', () => {
   const manifestText = readFileSync(
     new URL('../package.json', import.meta.url),
@@ -333,10 +544,13 @@ describe('package manifest and dependency direction', () => {
     expect(manifest.type).toBe('module');
     expect(manifest.exports).toEqual({
       '.': './src/index.ts',
+      './ledger': './src/ledger/index.ts',
       './testing': './src/testing/index.ts',
     });
     expect(manifest.dependencies).toEqual({
       '@aven/contracts': 'workspace:*',
+      '@aven/ledger': 'workspace:*',
+      '@aven/storage': 'workspace:*',
       zod: '4.6.5',
     });
     expect(manifest.devDependencies).toEqual({
